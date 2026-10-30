@@ -4,11 +4,13 @@ import { assetName } from "./lib/release-assets.mjs";
 const { REPO: repo, TAG: tag } = process.env;
 if (!repo || !tag) throw new Error("REPO and TAG are required");
 const gh = (...args) => execFileSync("gh", args, { encoding: "utf8" });
-const release = JSON.parse(gh("api", `repos/${repo}/releases/tags/${tag}`));
+const release = JSON.parse(
+  gh("release", "view", tag, "--repo", repo, "--json", "databaseId"),
+);
 const assets = JSON.parse(
   gh(
     "api",
-    `repos/${repo}/releases/${release.id}/assets`,
+    `repos/${repo}/releases/${release.databaseId}/assets`,
     "--paginate",
     "--slurp",
   ),
