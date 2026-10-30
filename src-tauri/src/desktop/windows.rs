@@ -61,6 +61,7 @@ extern "system" {
     fn GetWindowTextW(window: Handle, text: *mut u16, capacity: i32) -> i32;
     fn GetWindowThreadProcessId(window: Handle, pid: *mut u32) -> u32;
     fn GetForegroundWindow() -> Handle;
+    fn GetAsyncKeyState(key: i32) -> i16;
     fn SetForegroundWindow(window: Handle) -> i32;
     fn ShowWindow(window: Handle, command: i32) -> i32;
     fn GetClientRect(window: Handle, rect: *mut Rect) -> i32;
@@ -134,6 +135,11 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, String> {
 pub fn foreground_window() -> Option<u64> {
     let window = unsafe { GetForegroundWindow() };
     (!window.is_null()).then_some(window as usize as u64)
+}
+pub fn pointer_button_down() -> bool {
+    [1, 2, 4, 5, 6]
+        .iter()
+        .any(|key| unsafe { GetAsyncKeyState(*key) < 0 })
 }
 pub fn focus_window(id: u64) -> Result<(), String> {
     let window = id as usize as Handle;

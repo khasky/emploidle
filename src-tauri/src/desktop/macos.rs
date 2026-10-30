@@ -63,6 +63,7 @@ extern "C" {
     fn CGEventTapEnable(tap: Object, enable: u8);
     fn CGEventGetIntegerValueField(event: Object, field: u32) -> i64;
     fn CGEventGetFlags(event: Object) -> u64;
+    fn CGEventSourceButtonState(source: i32, button: u32) -> u8;
     static kCGWindowOwnerPID: Object;
     static kCGWindowOwnerName: Object;
 }
@@ -181,6 +182,9 @@ pub fn foreground_window() -> Option<u64> {
         .iter()
         .position(|entry| unsafe { CFEqual(entry.element as Object, focused.0) } != 0)
         .map(|index| index as u64 + 1)
+}
+pub fn pointer_button_down() -> bool {
+    (0..32).any(|button| unsafe { CGEventSourceButtonState(1, button) != 0 })
 }
 pub fn focus_window(id: u64) -> Result<(), String> {
     let registry = WINDOWS.lock().map_err(|_| "Window registry unavailable")?;

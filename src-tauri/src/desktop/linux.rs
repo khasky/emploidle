@@ -138,6 +138,17 @@ extern "C" {
         error: *mut c_int,
     ) -> c_int;
     fn XNextEvent(display: *mut Display, event: *mut c_void) -> c_int;
+    fn XQueryPointer(
+        display: *mut Display,
+        window: Window,
+        root: *mut Window,
+        child: *mut Window,
+        root_x: *mut c_int,
+        root_y: *mut c_int,
+        window_x: *mut c_int,
+        window_y: *mut c_int,
+        mask: *mut u32,
+    ) -> c_int;
     fn XGetEventData(display: *mut Display, cookie: *mut Cookie) -> c_int;
     fn XFreeEventData(display: *mut Display, cookie: *mut Cookie);
     fn XKeysymToKeycode(display: *mut Display, symbol: c_ulong) -> u8;
@@ -294,6 +305,27 @@ pub fn foreground_window() -> Option<u64> {
         .first()
         .copied()
         .filter(|id| *id != 0)
+}
+pub fn pointer_button_down() -> bool {
+    let Ok(connection) = Connection::open() else {
+        return true;
+    };
+    let (mut root, mut child, mut root_x, mut root_y, mut x, mut y, mut mask) =
+        (0, 0, 0, 0, 0, 0, 0);
+    unsafe {
+        XQueryPointer(
+            connection.0,
+            connection.root(),
+            &mut root,
+            &mut child,
+            &mut root_x,
+            &mut root_y,
+            &mut x,
+            &mut y,
+            &mut mask,
+        ) == 0
+            || mask & 0x1f00 != 0
+    }
 }
 pub fn focus_window(id: u64) -> Result<(), String> {
     let connection = Connection::open()?;

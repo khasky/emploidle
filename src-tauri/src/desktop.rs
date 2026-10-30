@@ -71,6 +71,10 @@ pub fn foreground_window() -> Option<u64> {
     native::foreground_window()
 }
 
+pub fn pointer_button_down() -> bool {
+    native::pointer_button_down()
+}
+
 pub fn focus_window(id: u64) -> Result<(), String> {
     native::focus_window(id)
 }

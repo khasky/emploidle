@@ -392,6 +392,7 @@ impl Guard<'_> {
 
     fn check(&self) -> StepResult {
         self.check_input()?;
+        self.check_pointer()?;
         if desktop::foreground_window() != Some(self.window) {
             return Err(StepError::Failed(
                 "The allowed window lost focus. Start again when ready.".into(),
@@ -402,6 +403,7 @@ impl Guard<'_> {
 
     fn focus(&self) -> StepResult {
         self.check_input()?;
+        self.check_pointer()?;
         if desktop::foreground_window() != Some(self.window) {
             desktop::focus_window(self.window).map_err(StepError::Failed)?;
         }
@@ -435,6 +437,14 @@ impl Guard<'_> {
     fn input(&self, operation: impl FnOnce() -> enigo::InputResult<()>) -> StepResult {
         self.check()?;
         operation().map_err(|error| StepError::Failed(error.to_string()))
+    }
+
+    fn check_pointer(&self) -> StepResult {
+        if desktop::pointer_button_down() {
+            self.controller.user_input();
+            return Err(StepError::Interrupted);
+        }
+        Ok(())
     }
 }
 
@@ -747,6 +757,9 @@ pub fn spawn_worker(controller: Arc<Controller>, app: AppHandle) {
                 controller.report(&app, "Paused");
                 thread::sleep(Duration::from_millis(120));
                 continue;
+            }
+            if desktop::pointer_button_down() {
+                controller.user_input();
             }
             if controller.last_input.lock().unwrap().elapsed() < USER_PAUSE {
                 controller.report(
