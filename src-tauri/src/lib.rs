@@ -1,32 +1,229 @@
 mod activity;
+mod activity_plan;
+mod autostart;
+mod desktop;
+mod preferences;
 mod process_name;
+mod schedule;
+mod source_context;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
+use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+
+use activity::{Configuration, Controller};
+use preferences::{Preferences, Settings, SettingsState};
+use schedule::{Decision, LocalClock};
 
 pub struct AppState {
-    running: Arc<AtomicBool>,
+    controller: Arc<Controller>,
 }
 
 /// Set the activity flag and notify the UI so the button stays in sync whether
 /// the toggle came from the window or the tray menu.
-fn set_running(app: &AppHandle, value: bool) {
-    app.state::<AppState>().running.store(value, Ordering::Relaxed);
-    let _ = app.emit("running-changed", value);
+fn set_running(app: &AppHandle, value: bool) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    if value {
+        state.controller.start(app).inspect_err(|error| {
+            state.controller.report(app, error);
+        })?;
+        if let Some(window) = app.get_webview_window("main") {
+            if let Err(error) = window.hide() {
+                state.controller.stop(app);
+                return Err(error.to_string());
+            }
+        }
+        state.controller.set_main_visible(app, false);
+        Ok(())
+    } else {
+        state.controller.stop(app);
+        Ok(())
+    }
 }
 
 #[tauri::command]
-fn set_active(app: AppHandle, active: bool) {
-    set_running(&app, active);
+fn set_active(app: AppHandle, active: bool) -> Result<(), String> {
+    set_running(&app, active)
 }
 
 #[tauri::command]
 fn is_active(state: State<AppState>) -> bool {
-    state.running.load(Ordering::Relaxed)
+    state.controller.running.load(Ordering::SeqCst)
+}
+
+#[tauri::command]
+fn activity_status(state: State<AppState>) -> String {
+    state.controller.status()
+}
+
+#[tauri::command]
+fn list_windows() -> Result<Vec<desktop::WindowInfo>, String> {
+    desktop::list_windows().map(|windows| {
+        windows
+            .into_iter()
+            .filter(|window| window.process_id != std::process::id())
+            .collect()
+    })
+}
+
+#[tauri::command]
+fn get_configuration(state: State<AppState>) -> Configuration {
+    state.controller.configuration.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn configure(
+    app: AppHandle,
+    state: State<AppState>,
+    mut configuration: Configuration,
+) -> Result<(), String> {
+    if state.controller.running.load(Ordering::SeqCst) {
+        return Err("Stop activity before changing allowed windows.".into());
+    }
+    let windows = list_windows()?;
+    let mut ids = std::collections::HashSet::new();
+    for target in &mut configuration.targets {
+        let window = windows.iter().find(|window| window.id == target.id);
+        if !ids.insert(target.id) || window.is_none() {
+            return Err(
+                "An allowed window is no longer available. Refresh the window list.".into(),
+            );
+        }
+        target.process_id = window.unwrap().process_id;
+    }
+    let settings = app.state::<SettingsState>();
+    let mut stored = settings.stored.lock().unwrap();
+    let mut updated = stored.clone();
+    updated.remember(&configuration, &windows)?;
+    state
+        .controller
+        .update_configuration(configuration, || updated.save(&settings.path))?;
+    *stored = updated;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_preferences(app: AppHandle) -> Result<Preferences, String> {
+    let mut preferences = app
+        .state::<SettingsState>()
+        .stored
+        .lock()
+        .unwrap()
+        .preferences
+        .clone();
+    preferences.autostart = autostart::enabled()?;
+    Ok(preferences)
+}
+
+#[tauri::command]
+async fn update_preferences(
+    app: AppHandle,
+    preferences: Preferences,
+) -> Result<Preferences, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        preferences.schedule.validate()?;
+        let settings = app.state::<SettingsState>();
+        let mut stored = settings.stored.lock().unwrap();
+        let previous_autostart = autostart::enabled()?;
+        let executable = process_name::executable_path().map_err(|error| error.to_string())?;
+        if preferences.autostart != previous_autostart {
+            autostart::set_enabled(preferences.autostart, &executable)?;
+        }
+        let mut updated = stored.clone();
+        updated.preferences = preferences.clone();
+        if let Err(error) = updated.save(&settings.path) {
+            if preferences.autostart != previous_autostart {
+                if let Err(rollback) = autostart::set_enabled(previous_autostart, &executable) {
+                    return Err(format!(
+                        "{error}; startup registration could not be restored: {rollback}"
+                    ));
+                }
+            }
+            return Err(error);
+        }
+        *stored = updated;
+        app.state::<AppState>()
+            .controller
+            .update_schedule(preferences.schedule.clone());
+        Ok(preferences)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn open_practice(app: AppHandle) -> Result<(), String> {
+    ensure_practice(&app, true)
+}
+
+fn ensure_practice(app: &AppHandle, focus: bool) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("practice") {
+        window.show().map_err(|error| error.to_string())?;
+        if focus {
+            window.set_focus().map_err(|error| error.to_string())?;
+        }
+        return Ok(());
+    }
+    WebviewWindowBuilder::new(app, "practice", WebviewUrl::App("practice.html".into()))
+        .title(activity::PRACTICE_TITLE)
+        .focused(focus)
+        .inner_size(760.0, 600.0)
+        .min_inner_size(480.0, 360.0)
+        .build()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn open_preview(app: AppHandle, id: u64) -> Result<(), String> {
+    let controller = app.state::<AppState>().controller.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        controller.open_preview(&app, id, None).map(|_| ())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+fn get_preview(state: State<AppState>) -> Result<activity::PreviewData, String> {
+    state
+        .controller
+        .preview
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("No local preview is open.".into())
+}
+
+#[tauri::command]
+fn practice_done(
+    window: tauri::WebviewWindow,
+    state: State<AppState>,
+    id: u64,
+) -> Result<(), String> {
+    if window.label() != "practice"
+        || state.controller.practice_sequence.load(Ordering::SeqCst) != id
+    {
+        return Err("Unexpected practice action completion.".into());
+    }
+    state
+        .controller
+        .practice_completed
+        .store(id, Ordering::SeqCst);
+    Ok(())
+}
+
+#[tauri::command]
+fn practice_can_type(
+    window: tauri::WebviewWindow,
+    state: State<AppState>,
+    id: u64,
+    epoch: u64,
+) -> bool {
+    window.label() == "practice" && state.controller.can_type(id, epoch)
 }
 
 #[tauri::command]
@@ -45,17 +242,63 @@ pub fn run() {
     };
 
     let mut context = tauri::generate_context!();
+    let background = std::env::args_os().any(|argument| argument == "--background");
     for window in &mut context.config_mut().app.windows {
-        window.title.clone_from(&process_name);
+        if window.label == "main" {
+            window.title.clone_from(&process_name);
+            window.visible = !background;
+        }
     }
 
-    let running = Arc::new(AtomicBool::new(false));
-    activity::spawn_worker(running.clone());
+    let controller = Arc::new(Controller::new());
+    controller.main_visible.store(!background, Ordering::SeqCst);
 
     tauri::Builder::default()
-        .manage(AppState { running })
-        .invoke_handler(tauri::generate_handler![set_active, is_active, app_version])
+        .manage(AppState { controller })
+        .invoke_handler(tauri::generate_handler![
+            set_active,
+            is_active,
+            app_version,
+            activity_status,
+            list_windows,
+            get_configuration,
+            configure,
+            open_practice,
+            open_preview,
+            get_preview,
+            practice_done,
+            practice_can_type,
+            get_preferences,
+            update_preferences
+        ])
         .setup(move |app| {
+            let path = app.path().app_config_dir()?.join("settings.json");
+            let (settings, load_error) = match Settings::load(&path) {
+                Ok(settings) => (settings, None),
+                Err(error) => (Settings::default(), Some(error)),
+            };
+            let controller = app.state::<AppState>().controller.clone();
+            controller
+                .scheduler
+                .lock()
+                .unwrap()
+                .update(settings.preferences.schedule.clone());
+            match desktop::list_windows() {
+                Ok(windows) => {
+                    *controller.configuration.lock().unwrap() = settings.resolve(&windows)
+                }
+                Err(error) if load_error.is_none() => controller.report(app.handle(), &error),
+                Err(_) => {}
+            }
+            app.manage(SettingsState {
+                path,
+                stored: std::sync::Mutex::new(settings),
+            });
+            if let Some(error) = load_error {
+                controller.report(app.handle(), &error);
+            }
+            activity::spawn_worker(controller.clone(), app.handle().clone());
+            spawn_scheduler(app.handle().clone());
             let show = MenuItem::with_id(app, "show", "Show window", true, None::<&str>)?;
             let start = MenuItem::with_id(app, "start", "Start", true, None::<&str>)?;
             let stop = MenuItem::with_id(app, "stop", "Stop", true, None::<&str>)?;
@@ -69,13 +312,27 @@ pub fn run() {
                 .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
+                        app.state::<AppState>()
+                            .controller
+                            .set_main_visible(app, true);
                         if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.unminimize();
                             let _ = w.show();
                             let _ = w.set_focus();
                         }
                     }
-                    "start" => set_running(app, true),
-                    "stop" => set_running(app, false),
+                    "start" => {
+                        if set_running(app, true).is_err() {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.unminimize();
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    }
+                    "stop" => {
+                        let _ = set_running(app, false);
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -83,12 +340,61 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+            let app = window.app_handle();
+            let controller = &app.state::<AppState>().controller;
+            if let WindowEvent::Focused(true) = event {
+                if window.is_visible().unwrap_or(false) {
+                    controller.set_main_visible(app, true);
+                }
+            }
+            if let WindowEvent::Resized(_) = event {
+                if window.is_minimized().unwrap_or(false) && window.hide().is_ok() {
+                    controller.set_main_visible(app, false);
+                }
+            }
             // Closing the window hides it to the tray; real exit is tray → Quit.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                let _ = window.hide();
+                if window.hide().is_ok() {
+                    controller.set_main_visible(app, false);
+                }
             }
         })
         .run(context)
         .expect("error while running Emploidle");
+}
+
+fn spawn_scheduler(app: AppHandle) {
+    std::thread::spawn(move || loop {
+        let controller = app.state::<AppState>().controller.clone();
+        if let Ok(clock) = LocalClock::now() {
+            let (intent, decision) = controller.schedule_decision(clock);
+            match decision {
+                Some(Decision::Start) if !controller.running.load(Ordering::SeqCst) => {
+                    let result = (|| -> Result<(), String> {
+                        let windows = desktop::list_windows()?;
+                        let configuration = app
+                            .state::<SettingsState>()
+                            .stored
+                            .lock()
+                            .unwrap()
+                            .resolve(&windows);
+                        if configuration.practice {
+                            ensure_practice(&app, false)?;
+                        }
+                        controller.start_scheduled(&app, intent, configuration)
+                    })();
+                    if let Err(error) = result {
+                        controller.fail_scheduled(&app, intent, &error);
+                    }
+                }
+                Some(Decision::Stop) => controller.stop_for_schedule(&app, intent),
+                _ => {}
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    });
 }

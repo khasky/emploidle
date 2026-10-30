@@ -9,8 +9,37 @@
   <body>
     <main class="app">
       <h1 class="brand">Emploidle</h1>
-      <p class="status" id="status">Idle</p>
-      <button id="toggle" class="toggle" data-active="false">Start</button>
+      <p class="status" id="status" role="status">Loading…</p>
+      <button id="toggle" class="toggle" data-active="false" disabled>Start</button>
+      <fieldset id="configuration" disabled>
+        <legend>Activity windows</legend>
+        <p class="hint">Reading hovers in allowed windows. Local preview scrolls through a copied text snapshot.</p>
+        <p class="hint">External tabs, comments and messages are not opened. Previews stay local.</p>
+        <p class="hint">Text snapshots are currently available on Windows; some windows may not expose text.</p>
+        <button id="refresh" class="secondary" type="button">Refresh windows</button>
+        <div id="windows" class="windows"></div>
+        <div class="practice-option">
+          <label><input id="practice" type="checkbox" /> Practice document</label>
+          <button id="open-practice" class="secondary" type="button">Open</button>
+        </div>
+        <p class="hint">Types a short passage, then gradually removes it. External drafts and read states are untouched.</p>
+      </fieldset>
+      <form id="preferences-form">
+        <fieldset id="preferences" disabled>
+          <legend>Schedule</legend>
+          <div class="schedule-times">
+            <label for="schedule-start">Start<input id="schedule-start" type="time" value="00:00" required /></label>
+            <label for="schedule-finish">Finish<input id="schedule-finish" type="time" value="00:00" required /></label>
+          </div>
+          <label class="startup-option"><input id="autostart" type="checkbox" /> Start with system</label>
+          <p class="hint">00:00–00:00 disables schedule. Uses system time.</p>
+          <p class="hint">Schedule runs while Emploidle is open.</p>
+          <p class="hint">Stop pauses the current shift; the next shift starts automatically.</p>
+          <button class="secondary apply-preferences" type="submit">Apply</button>
+        </fieldset>
+      </form>
+      <p id="error" class="error" role="alert" aria-live="assertive"></p>
+      <p class="hint">Pauses while you use the mouse or keyboard. Ctrl + Alt + Escape stops activity globally.</p>
       <p class="hint">Closing the window hides it to the tray. Quit from the tray menu.</p>
       <p class="hint" id="version" aria-label="Application version"></p>
     </main>

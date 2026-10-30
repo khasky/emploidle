@@ -45,6 +45,18 @@ pub fn prepare() -> io::Result<Option<String>> {
 
 #[cfg(target_os = "windows")]
 const LAUNCH_PATH: &str = "EMPLOIDLE_LAUNCH_PATH";
+#[cfg(target_os = "windows")]
+const ORIGINAL_PATH: &str = "EMPLOIDLE_ORIGINAL_EXECUTABLE";
+#[cfg(target_os = "windows")]
+static EXECUTABLE_PATH: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+pub fn executable_path() -> io::Result<std::path::PathBuf> {
+    #[cfg(target_os = "windows")]
+    if let Some(path) = EXECUTABLE_PATH.get() {
+        return Ok(path.clone());
+    }
+    std::env::current_exe()
+}
 
 #[cfg(target_os = "windows")]
 pub fn prepare() -> io::Result<Option<String>> {
@@ -52,9 +64,16 @@ pub fn prepare() -> io::Result<Option<String>> {
 
     let executable = env::current_exe()?.canonicalize()?;
     let launched_path = env::var_os(LAUNCH_PATH);
+    let original_path = env::var_os(ORIGINAL_PATH);
     env::remove_var(LAUNCH_PATH);
+    env::remove_var(ORIGINAL_PATH);
     if let Some(path) = launched_path {
         if PathBuf::from(path).canonicalize()? == executable {
+            let original = original_path
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute() && path.is_file())
+                .unwrap_or_else(|| executable.clone());
+            let _ = EXECUTABLE_PATH.set(original);
             return Ok(Some(
                 executable
                     .file_stem()
@@ -84,7 +103,7 @@ pub fn prepare() -> io::Result<Option<String>> {
     }
 
     let path = directory.join(format!("{}.exe", random_name()));
-    let mut original = fs::File::open(executable)?;
+    let mut original = fs::File::open(&executable)?;
     let mut copy = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -102,6 +121,7 @@ pub fn prepare() -> io::Result<Option<String>> {
     if let Err(error) = Command::new(&path)
         .args(env::args_os().skip(1))
         .env(LAUNCH_PATH, &path)
+        .env(ORIGINAL_PATH, &executable)
         .spawn()
     {
         let _ = fs::remove_file(&path);
@@ -221,9 +241,17 @@ mod tests {
         use std::{env, process::Command};
 
         const PROBE: &str = "EMPLOIDLE_PROCESS_PROBE";
+        const PROBE_ORIGINAL: &str = "EMPLOIDLE_PROCESS_PROBE_ORIGINAL";
         if env::var_os(PROBE).is_some() {
             if let Some(name) = prepare().unwrap() {
                 assert!(env::var_os(LAUNCH_PATH).is_none());
+                assert!(env::var_os(ORIGINAL_PATH).is_none());
+                assert_eq!(
+                    executable_path().unwrap().canonicalize().unwrap(),
+                    std::path::PathBuf::from(env::var_os(PROBE_ORIGINAL).unwrap())
+                        .canonicalize()
+                        .unwrap()
+                );
                 let executable = env::current_exe().unwrap();
                 let stem = executable.file_stem().unwrap().to_str().unwrap();
                 assert_eq!(stem.len(), 15);
@@ -243,6 +271,7 @@ mod tests {
                     "--nocapture",
                 ])
                 .env(PROBE, "1")
+                .env(PROBE_ORIGINAL, env::current_exe().unwrap())
                 .env_remove(LAUNCH_PATH)
                 .output()
                 .unwrap();
