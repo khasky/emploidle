@@ -1,0 +1,22 @@
+[package]
+name = "emploidle"
+version = "1.0.0"
+description = "Anti-idle activity simulator with a tray icon"
+authors = ["https://github.com/khasky"]
+license = "MIT"
+edition = "2021"
+
+[lib]
+# the lib name is distinct from the bin name so they don't collide
+name = "emploidle_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+enigo = "0.6"
+rand = "0.9"

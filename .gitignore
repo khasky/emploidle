@@ -1,0 +1,10 @@
+# Rust / Tauri build output
+/src-tauri/target/
+/src-tauri/gen/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+# Node.js tooling
+/node_modules/
+*.log
