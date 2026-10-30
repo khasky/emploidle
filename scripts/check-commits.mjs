@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 const head = process.env.HEAD_SHA;
 const base = process.env.BASE_SHA;
@@ -7,6 +7,16 @@ if (!head || !/^[0-9a-f]{40}$/.test(head))
 if (base && !/^[0-9a-f]{40}$/.test(base))
   throw new Error("BASE_SHA must be a Git commit hash");
 const range = base && !/^0+$/.test(base) ? `${base}..${head}` : head;
+if (
+  range !== head &&
+  spawnSync("git", ["cat-file", "-e", `${base}^{commit}`], {
+    stdio: "ignore",
+  }).status !== 0
+) {
+  execFileSync("git", ["fetch", "--no-tags", "origin", base], {
+    stdio: "inherit",
+  });
+}
 const messages = execFileSync(
   "git",
   ["log", "--no-merges", "-z", "--format=%B", range],
