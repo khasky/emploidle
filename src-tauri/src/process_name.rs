@@ -55,7 +55,7 @@ pub fn executable_path() -> io::Result<std::path::PathBuf> {
     if let Some(path) = EXECUTABLE_PATH.get() {
         return Ok(path.clone());
     }
-    std::env::current_exe()
+    tauri::process::current_binary(&tauri::Env::default())
 }
 
 #[cfg(target_os = "windows")]
