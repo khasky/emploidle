@@ -59,9 +59,23 @@ mod tests {
         let settings: Settings = serde_json::from_str(stored).unwrap();
         assert_eq!(settings.preferences.schedule.start, "09:00");
         assert_eq!(settings.preferences.schedule.finish, "18:00");
+        assert_eq!(settings.preferences.schedule.days, [true; 7]);
         assert!(settings.preferences.autostart);
         let saved = serde_json::to_value(settings).unwrap();
         assert!(saved.get("targets").is_none());
         assert!(saved.get("practice").is_none());
+    }
+
+    #[test]
+    fn selected_days_survive_settings_serialization() {
+        let mut settings = Settings::default();
+        settings.preferences.schedule.days = [true, false, true, false, true, false, false];
+        let saved = serde_json::to_vec(&settings).unwrap();
+        let loaded: Settings = serde_json::from_slice(&saved).unwrap();
+        assert_eq!(loaded.preferences.schedule, settings.preferences.schedule);
+        for days in ["[]", "[true]", "[0,0,0,0,0,0,0]"] {
+            let schedule = format!(r#"{{"start":"09:00","finish":"17:00","days":{days}}}"#);
+            assert!(serde_json::from_str::<Schedule>(&schedule).is_err());
+        }
     }
 }

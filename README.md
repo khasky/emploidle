@@ -13,7 +13,7 @@ A desktop anti-idle activity simulator with automatic window discovery, varied c
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="screenshots/dark-main.png">
   <source media="(prefers-color-scheme: light)" srcset="screenshots/light-main.png">
-  <img src="screenshots/light-main.png" width="360" alt="Emploidle main screen with automatic activity and daily schedule controls">
+  <img src="screenshots/light-main.png" width="360" alt="Emploidle main screen with automatic activity and weekly schedule controls">
 </picture>
 
 <p><sub>Application interface with demonstration data. Screenshots follow your light or dark theme.</sub></p>
@@ -28,18 +28,18 @@ A desktop anti-idle activity simulator with automatic window discovery, varied c
 - **Automatic window discovery.** Open applications become available automatically, without window lists, permissions to configure or practice documents.
 - **Application-aware actions on Windows.** Hover over accessible content, scroll supported document controls and restore their position, temporarily review supported browser pages in an owned tab, or review VS Code sidebars, project files and folders.
 - **Pauses for your input.** Physical keyboard or mouse activity interrupts the simulation. It resumes after 8 seconds without physical input; a global shortcut stops it immediately.
-- **Daily schedule.** Set start and finish times, including overnight shifts, and optionally launch Emploidle at login.
+- **Weekly schedule.** Choose days of the week and start and finish times, including overnight shifts, and optionally launch Emploidle at login.
 - **Tray controls and updates.** Start, stop or reopen the window from the tray. Builds with updater support offer signed updates with download progress and a restart button.
 
 <details>
 <summary><b>More screenshots: schedule, paused activity and updates</b></summary>
 
-**Daily schedule**
+**Weekly schedule**
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="screenshots/dark-schedule.png">
   <source media="(prefers-color-scheme: light)" srcset="screenshots/light-schedule.png">
-  <img src="screenshots/light-schedule.png" width="400" alt="Daily schedule from 09:00 to 18:00, with launch at login turned off">
+  <img src="screenshots/light-schedule.png" width="400" alt="Monday through Friday schedule from 09:00 to 18:00, with launch at login turned off">
 </picture>
 
 **Paused activity**
@@ -115,12 +115,12 @@ Open windows are rediscovered between scenarios. Closed or unavailable windows a
 
 ## Schedule and startup
 
-Set **Start** and **Finish** under **Schedule**, then press **Apply**. The schedule follows the system's local time, and Emploidle must remain open in the tray for it to run.
+Choose the days and set **Start** and **Finish** under **Schedule**, then press **Apply**. The schedule follows the system's local time, and Emploidle must remain open in the tray for it to run. Selected days identify when a shift starts; a Friday overnight shift finishes on Saturday even when Saturday is unchecked. Existing schedules keep all days selected.
 
 | Setting or action | Behavior |
 | --- | --- |
-| `00:00`–`00:00` | Scheduling is disabled by default. |
-| Different start and finish times | A daily shift, including shifts that cross midnight. |
+| `00:00`–`00:00` or no selected days | Scheduling is disabled. |
+| Different start and finish times | A shift on each selected day, including shifts that cross midnight. |
 | Manual **Stop** during a shift | Suppresses the remainder of that shift; the next shift can start automatically. |
 | Manual **Start** outside a shift | Runs until **Stop** or the next scheduled finish. |
 | **Start with system** | Launches in the background at user login; off by default. |

@@ -7,7 +7,11 @@ export default function mockTauri({ version }) {
     is_active: state === "paused",
     activity_status: state === "paused" ? "Paused" : "Idle",
     get_preferences: {
-      schedule: { start: "09:00", finish: "18:00" },
+      schedule: {
+        start: "09:00",
+        finish: "18:00",
+        days: [true, true, true, true, true, false, false],
+      },
       autostart: false,
     },
     check_update:

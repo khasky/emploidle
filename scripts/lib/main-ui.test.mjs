@@ -7,7 +7,7 @@ const source = readFileSync(
   "utf8",
 );
 
-async function mainWindow() {
+async function mainWindow(days = [true, true, true, true, true, true, true]) {
   const elements = new Map(
     [
       "toggle",
@@ -17,6 +17,13 @@ async function mainWindow() {
       "preferences-form",
       "schedule-start",
       "schedule-finish",
+      "schedule-mon",
+      "schedule-tue",
+      "schedule-wed",
+      "schedule-thu",
+      "schedule-fri",
+      "schedule-sat",
+      "schedule-sun",
       "autostart",
       "version",
     ].map((id) => [
@@ -37,7 +44,7 @@ async function mainWindow() {
   const events = new Map();
   let active = false;
   let saved = {
-    schedule: { start: "00:00", finish: "00:00" },
+    schedule: { start: "00:00", finish: "00:00", days },
     autostart: false,
   };
   const invoke = vi.fn(async (command, payload) => {
@@ -91,16 +98,51 @@ it("saves a schedule without a target selection", async () => {
   const ui = await mainWindow();
   ui.elements.get("schedule-start").value = "09:00";
   ui.elements.get("schedule-finish").value = "18:00";
+  ui.elements.get("schedule-sat").checked = false;
+  ui.elements.get("schedule-sun").checked = false;
   ui.elements.get("preferences-form").submit({ preventDefault() {} });
   await vi.waitFor(() =>
     expect(ui.invoke).toHaveBeenCalledWith("update_preferences", {
       preferences: {
-        schedule: { start: "09:00", finish: "18:00" },
+        schedule: {
+          start: "09:00",
+          finish: "18:00",
+          days: [true, true, true, true, true, false, false],
+        },
         autostart: false,
       },
     }),
   );
   expect(ui.elements.get("error").textContent).toBe("");
+});
+
+it("loads saved weekdays and allows disabling every day", async () => {
+  const ui = await mainWindow([false, true, false, false, true, false, true]);
+  for (const [day, checked] of [
+    ["mon", false],
+    ["tue", true],
+    ["wed", false],
+    ["thu", false],
+    ["fri", true],
+    ["sat", false],
+    ["sun", true],
+  ]) {
+    expect(ui.elements.get(`schedule-${day}`).checked).toBe(checked);
+    ui.elements.get(`schedule-${day}`).checked = false;
+  }
+  ui.elements.get("preferences-form").submit({ preventDefault() {} });
+  await vi.waitFor(() =>
+    expect(ui.invoke).toHaveBeenCalledWith("update_preferences", {
+      preferences: {
+        schedule: {
+          start: "00:00",
+          finish: "00:00",
+          days: [false, false, false, false, false, false, false],
+        },
+        autostart: false,
+      },
+    }),
+  );
 });
 
 it("keeps Stop available when opening the main window pauses activity", async () => {

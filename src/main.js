@@ -8,6 +8,8 @@ const preferences = document.getElementById("preferences");
 const preferencesForm = document.getElementById("preferences-form");
 const scheduleStart = document.getElementById("schedule-start");
 const scheduleFinish = document.getElementById("schedule-finish");
+const scheduleDays = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+  .map((day) => document.getElementById(`schedule-${day}`));
 const autostart = document.getElementById("autostart");
 let active = false;
 let pending = true;
@@ -24,6 +26,9 @@ function render() {
 function renderPreferences(saved) {
   scheduleStart.value = saved.schedule.start;
   scheduleFinish.value = saved.schedule.finish;
+  scheduleDays.forEach((checkbox, index) => {
+    checkbox.checked = saved.schedule.days[index];
+  });
   autostart.checked = saved.autostart;
 }
 
@@ -48,7 +53,11 @@ preferencesForm.addEventListener("submit", (event) => {
   perform(async () => {
     renderPreferences(await invoke("update_preferences", {
       preferences: {
-        schedule: { start: scheduleStart.value, finish: scheduleFinish.value },
+        schedule: {
+          start: scheduleStart.value,
+          finish: scheduleFinish.value,
+          days: scheduleDays.map((checkbox) => checkbox.checked),
+        },
         autostart: autostart.checked,
       },
     }));

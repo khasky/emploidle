@@ -4,12 +4,24 @@ use serde::{Deserialize, Serialize};
 pub struct Schedule {
     pub start: String,
     pub finish: String,
+    #[serde(default = "every_day")]
+    pub days: [bool; 7],
+}
+
+fn every_day() -> [bool; 7] {
+    [true; 7]
+}
+
+fn weekday(day: i64) -> usize {
+    // Civil day zero is Thursday, January 1, 1970; the selection starts on Monday.
+    ((day.rem_euclid(7) + 3) % 7) as usize
 }
 impl Default for Schedule {
     fn default() -> Self {
         Self {
             start: "00:00".into(),
             finish: "00:00".into(),
+            days: every_day(),
         }
     }
 }
@@ -43,7 +55,7 @@ impl Schedule {
         if start == finish || clock.minute >= 1440 {
             return None;
         }
-        if start < finish {
+        let shift = if start < finish {
             (start <= clock.minute && clock.minute < finish).then_some(clock.day)
         } else if clock.minute >= start {
             Some(clock.day)
@@ -51,10 +63,11 @@ impl Schedule {
             Some(clock.day - 1)
         } else {
             None
-        }
+        };
+        shift.filter(|day| self.days[weekday(*day)])
     }
     fn enabled(&self) -> bool {
-        self.validate().is_ok() && self.start != self.finish
+        self.validate().is_ok() && self.start != self.finish && self.days.contains(&true)
     }
 }
 
@@ -192,7 +205,11 @@ impl Scheduler {
             return None;
         }
         let finish = minute(&self.schedule.finish)?;
-        Some((clock.day + i64::from(clock.minute >= finish), finish))
+        let overnight = i64::from(minute(&self.schedule.start)? > finish);
+        (clock.day - 1..=clock.day + 7)
+            .filter(|day| self.schedule.days[weekday(*day)])
+            .map(|day| (day + overnight, finish))
+            .find(|end| *end > (clock.day, clock.minute))
     }
     pub fn tick(&mut self, clock: LocalClock) -> Option<Decision> {
         if !self.schedule.enabled() {
@@ -259,6 +276,7 @@ mod tests {
         Schedule {
             start: start.into(),
             finish: finish.into(),
+            ..Schedule::default()
         }
     }
     #[test]
@@ -291,6 +309,82 @@ mod tests {
         let mut scheduler = Scheduler::new(shift);
         scheduler.manual_start(clock(4, "23:00"));
         assert_eq!(scheduler.tick(clock(5, "06:00")), Some(Decision::Stop));
+    }
+
+    #[test]
+    fn selected_weekdays_skip_weekends_and_preserve_manual_stop() {
+        let friday = civil_day(2026, 11, 6);
+        let monday = civil_day(2026, 11, 9);
+        let mut shift = schedule("09:00", "17:00");
+        shift.days = [true, true, true, true, true, false, false];
+        let mut scheduler = Scheduler::new(shift);
+        assert_eq!(
+            scheduler.tick(clock(friday, "09:00")),
+            Some(Decision::Start)
+        );
+        scheduler.manual_stop(clock(friday, "10:00"));
+        assert_eq!(scheduler.tick(clock(friday, "11:00")), None);
+        assert_eq!(scheduler.tick(clock(civil_day(2026, 11, 7), "10:00")), None);
+        assert_eq!(scheduler.tick(clock(civil_day(2026, 11, 8), "10:00")), None);
+        assert_eq!(
+            scheduler.tick(clock(monday, "09:00")),
+            Some(Decision::Start)
+        );
+        assert_eq!(scheduler.tick(clock(monday, "17:00")), Some(Decision::Stop));
+        assert_eq!(weekday(civil_day(1969, 12, 28)), 6);
+        assert_eq!(weekday(0), 3);
+    }
+
+    #[test]
+    fn selected_overnight_shift_finishes_on_unselected_day_and_across_week_boundary() {
+        for (day, selected) in [(civil_day(2026, 11, 6), 4), (civil_day(2026, 11, 8), 6)] {
+            let mut shift = schedule("22:00", "06:00");
+            shift.days = [false; 7];
+            shift.days[selected] = true;
+            assert_eq!(shift.active_shift(clock(day + 1, "05:59")), Some(day));
+            assert_eq!(shift.active_shift(clock(day + 1, "22:00")), None);
+            let mut reopened = Scheduler::new(shift.clone());
+            assert_eq!(
+                reopened.tick(clock(day + 1, "05:59")),
+                Some(Decision::Start)
+            );
+            assert_eq!(reopened.tick(clock(day + 1, "06:00")), Some(Decision::Stop));
+            let mut scheduler = Scheduler::new(shift);
+            assert_eq!(scheduler.tick(clock(day, "21:59")), None);
+            assert_eq!(scheduler.tick(clock(day, "22:00")), Some(Decision::Start));
+            assert_eq!(scheduler.tick(clock(day + 1, "05:59")), None);
+            assert_eq!(
+                scheduler.tick(clock(day + 1, "06:00")),
+                Some(Decision::Stop)
+            );
+            assert_eq!(scheduler.tick(clock(day + 1, "22:00")), None);
+            assert_eq!(
+                scheduler.tick(clock(day + 7, "22:00")),
+                Some(Decision::Start)
+            );
+        }
+    }
+
+    #[test]
+    fn manual_run_waits_for_next_selected_finish_and_no_days_disables_automation() {
+        let friday = civil_day(2026, 11, 6);
+        let monday = civil_day(2026, 11, 9);
+        let mut shift = schedule("09:00", "17:00");
+        shift.days = [true, false, false, false, false, false, false];
+        let mut scheduler = Scheduler::new(shift.clone());
+        scheduler.manual_start(clock(friday, "10:00"));
+        assert_eq!(scheduler.tick(clock(friday, "17:00")), None);
+        assert_eq!(
+            scheduler.tick(clock(monday, "09:00")),
+            Some(Decision::Start)
+        );
+        assert_eq!(scheduler.tick(clock(monday, "17:00")), Some(Decision::Stop));
+        shift.days = [false; 7];
+        assert!(shift.validate().is_ok());
+        let mut scheduler = Scheduler::new(shift);
+        assert_eq!(scheduler.tick(clock(monday, "09:00")), None);
+        scheduler.manual_start(clock(monday, "10:00"));
+        assert_eq!(scheduler.tick(clock(monday, "17:00")), None);
     }
     #[test]
     fn manual_outside_adopts_next_shift_and_disabled_never_stops() {

@@ -26,8 +26,21 @@
             <label for="schedule-start">Start<input id="schedule-start" type="time" value="00:00" required /></label>
             <label for="schedule-finish">Finish<input id="schedule-finish" type="time" value="00:00" required /></label>
           </div>
+          <fieldset class="schedule-days" aria-describedby="schedule-days-hint">
+            <legend>Days</legend>
+            <div class="weekday-options">
+              <label><input id="schedule-mon" type="checkbox" aria-label="Monday" checked />Mon</label>
+              <label><input id="schedule-tue" type="checkbox" aria-label="Tuesday" checked />Tue</label>
+              <label><input id="schedule-wed" type="checkbox" aria-label="Wednesday" checked />Wed</label>
+              <label><input id="schedule-thu" type="checkbox" aria-label="Thursday" checked />Thu</label>
+              <label><input id="schedule-fri" type="checkbox" aria-label="Friday" checked />Fri</label>
+              <label><input id="schedule-sat" type="checkbox" aria-label="Saturday" checked />Sat</label>
+              <label><input id="schedule-sun" type="checkbox" aria-label="Sunday" checked />Sun</label>
+            </div>
+          </fieldset>
+          <p id="schedule-days-hint" class="hint">Days apply to the start of each shift.</p>
           <label class="startup-option"><input id="autostart" type="checkbox" /> Start with system</label>
-          <p class="hint">00:00–00:00 disables schedule. Uses system time.</p>
+          <p class="hint">00:00–00:00 or no selected days disables schedule. Uses system time.</p>
           <p class="hint">Schedule runs while Emploidle is open.</p>
           <p class="hint">Stop pauses the current shift; the next shift starts automatically.</p>
           <button class="secondary apply-preferences" type="submit">Apply</button>

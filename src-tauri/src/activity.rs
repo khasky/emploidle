@@ -765,6 +765,7 @@ mod tests {
         let shift = Schedule {
             start: "09:00".into(),
             finish: "17:00".into(),
+            ..Schedule::default()
         };
         controller.update_schedule(shift.clone());
         let clock = LocalClock {
