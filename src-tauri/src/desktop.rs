@@ -37,8 +37,125 @@ pub struct Bounds {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Snapshot {
     pub domain: Option<String>,
-    pub text: String,
     pub rows: Vec<Bounds>,
+    #[serde(default)]
+    pub scroll: Option<ScrollPosition>,
+    #[serde(default)]
+    pub links: Vec<AccessibleLink>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AccessibleLink {
+    pub address: String,
+    pub visited: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct BrowserContext {
+    pub address: String,
+    pub selected: Vec<i32>,
+    pub address_focused: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BrowserSession {
+    pub created: Vec<i32>,
+    pub original: Vec<i32>,
+}
+
+pub fn browser_context(window: u64, process_id: u32) -> Result<BrowserContext, String> {
+    #[cfg(target_os = "windows")]
+    {
+        accessibility::browser_context(window, process_id)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, process_id);
+        Err("Browser controls are unavailable on this platform.".into())
+    }
+}
+
+pub fn open_browser_tab(window: u64, process_id: u32) -> Result<BrowserSession, String> {
+    #[cfg(target_os = "windows")]
+    {
+        accessibility::open_tab(window, process_id)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, process_id);
+        Err("Browser controls are unavailable on this platform.".into())
+    }
+}
+
+pub fn close_browser_tab(
+    window: u64,
+    process_id: u32,
+    session: BrowserSession,
+) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        accessibility::close_tab(window, process_id, session)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, process_id, session);
+        Err("Browser controls are unavailable on this platform.".into())
+    }
+}
+
+pub fn review_tree(window: u64, process_id: u32, index: u32) -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        accessibility::review_tree(window, process_id, index)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, process_id, index);
+        Ok(false)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ScrollPosition {
+    pub element: Vec<i32>,
+    pub horizontal: f64,
+    pub vertical: f64,
+    pub bounds: Bounds,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ScrollReceipt {
+    pub before: ScrollPosition,
+    pub after: ScrollPosition,
+}
+
+pub fn scroll_window(
+    window: u64,
+    process_id: u32,
+    horizontal: bool,
+    amount: i32,
+) -> Result<ScrollReceipt, String> {
+    #[cfg(target_os = "windows")]
+    {
+        accessibility::scroll(window, process_id, horizontal, amount)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, process_id, horizontal, amount);
+        Err("This platform does not expose restorable scrolling.".into())
+    }
+}
+
+pub fn restore_scroll(window: u64, process_id: u32, receipt: ScrollReceipt) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        accessibility::restore(window, process_id, receipt)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, process_id, receipt);
+        Err("This platform does not expose restorable scrolling.".into())
+    }
 }
 
 pub fn inspect_window(window: u64, process_id: u32) -> Result<Snapshot, String> {

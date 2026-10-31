@@ -257,6 +257,12 @@ legend {
   letter-spacing: 0.2px;
 }
 
+.brand-version {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
 .status {
   margin: 0;
   font-size: 1rem;

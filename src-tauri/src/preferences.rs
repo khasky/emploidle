@@ -3,8 +3,6 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::activity::{Configuration, Target, TargetContext};
-use crate::desktop::WindowInfo;
 use crate::schedule::Schedule;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -13,21 +11,10 @@ pub struct Preferences {
     pub autostart: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct SavedTarget {
-    application: String,
-    title: String,
-    context: TargetContext,
-}
-
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Settings {
     #[serde(default)]
     pub preferences: Preferences,
-    #[serde(default)]
-    targets: Vec<SavedTarget>,
-    #[serde(default)]
-    practice: bool,
 }
 
 pub struct SettingsState {
@@ -60,56 +47,6 @@ impl Settings {
         std::fs::rename(temporary, path)
             .map_err(|error| format!("Cannot replace settings: {error}"))
     }
-
-    pub fn remember(
-        &mut self,
-        configuration: &Configuration,
-        windows: &[WindowInfo],
-    ) -> Result<(), String> {
-        let mut targets = Vec::new();
-        for target in &configuration.targets {
-            let source = windows
-                .iter()
-                .find(|window| window.id == target.id && window.process_id == target.process_id)
-                .ok_or("A selected window closed before its settings could be saved.")?;
-            if source.application.is_empty() {
-                return Err("The selected application's identity is unavailable; its window cannot be remembered.".into());
-            }
-            targets.push(SavedTarget {
-                application: source.application.clone(),
-                title: source.title.clone(),
-                context: target.context,
-            });
-        }
-        self.targets = targets;
-        self.practice = configuration.practice;
-        Ok(())
-    }
-
-    pub fn resolve(&self, windows: &[WindowInfo]) -> Configuration {
-        let targets = windows
-            .iter()
-            .filter_map(|window| {
-                if window.process_id == std::process::id() {
-                    return None;
-                }
-                self.targets
-                    .iter()
-                    .find(|target| {
-                        target.application == window.application && target.title == window.title
-                    })
-                    .map(|target| Target {
-                        id: window.id,
-                        process_id: window.process_id,
-                        context: target.context,
-                    })
-            })
-            .collect();
-        Configuration {
-            targets,
-            practice: self.practice,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -117,31 +54,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn restored_permissions_require_the_same_application_and_window_title() {
-        let settings = Settings {
-            targets: vec![SavedTarget {
-                application: "notepad.exe".into(),
-                title: "Notes".into(),
-                context: TargetContext::Reading,
-            }],
-            practice: true,
-            ..Settings::default()
-        };
-        let source = WindowInfo {
-            id: 42,
-            process_id: u32::MAX,
-            application: "notepad.exe".into(),
-            title: "Notes".into(),
-        };
-        let mut renamed = source.clone();
-        renamed.title = "Another document".into();
-        let mut different = source.clone();
-        different.application = "other.exe".into();
-        let mut own = source.clone();
-        own.process_id = std::process::id();
-        let restored = settings.resolve(&[source, renamed, different, own]);
-        assert_eq!(restored.targets.len(), 1);
-        assert_eq!(restored.targets[0].id, 42);
-        assert!(restored.practice);
+    fn obsolete_window_permissions_are_ignored_without_losing_preferences() {
+        let stored = r#"{"preferences":{"schedule":{"start":"09:00","finish":"18:00"},"autostart":true},"targets":[{"application":"editor.exe","title":"Notes","context":"reading"}],"practice":true}"#;
+        let settings: Settings = serde_json::from_str(stored).unwrap();
+        assert_eq!(settings.preferences.schedule.start, "09:00");
+        assert_eq!(settings.preferences.schedule.finish, "18:00");
+        assert!(settings.preferences.autostart);
+        let saved = serde_json::to_value(settings).unwrap();
+        assert!(saved.get("targets").is_none());
+        assert!(saved.get("practice").is_none());
     }
 }

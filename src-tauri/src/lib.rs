@@ -13,9 +13,9 @@ use std::sync::Arc;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Manager, State, WindowEvent};
 
-use activity::{Configuration, Controller};
+use activity::Controller;
 use preferences::{Preferences, Settings, SettingsState};
 use schedule::{Decision, LocalClock};
 
@@ -58,52 +58,6 @@ fn is_active(state: State<AppState>) -> bool {
 #[tauri::command]
 fn activity_status(state: State<AppState>) -> String {
     state.controller.status()
-}
-
-#[tauri::command]
-fn list_windows() -> Result<Vec<desktop::WindowInfo>, String> {
-    desktop::list_windows().map(|windows| {
-        windows
-            .into_iter()
-            .filter(|window| window.process_id != std::process::id())
-            .collect()
-    })
-}
-
-#[tauri::command]
-fn get_configuration(state: State<AppState>) -> Configuration {
-    state.controller.configuration.lock().unwrap().clone()
-}
-
-#[tauri::command]
-fn configure(
-    app: AppHandle,
-    state: State<AppState>,
-    mut configuration: Configuration,
-) -> Result<(), String> {
-    if state.controller.running.load(Ordering::SeqCst) {
-        return Err("Stop activity before changing allowed windows.".into());
-    }
-    let windows = list_windows()?;
-    let mut ids = std::collections::HashSet::new();
-    for target in &mut configuration.targets {
-        let window = windows.iter().find(|window| window.id == target.id);
-        if !ids.insert(target.id) || window.is_none() {
-            return Err(
-                "An allowed window is no longer available. Refresh the window list.".into(),
-            );
-        }
-        target.process_id = window.unwrap().process_id;
-    }
-    let settings = app.state::<SettingsState>();
-    let mut stored = settings.stored.lock().unwrap();
-    let mut updated = stored.clone();
-    updated.remember(&configuration, &windows)?;
-    state
-        .controller
-        .update_configuration(configuration, || updated.save(&settings.path))?;
-    *stored = updated;
-    Ok(())
 }
 
 #[tauri::command]
@@ -156,78 +110,6 @@ async fn update_preferences(
 }
 
 #[tauri::command]
-async fn open_practice(app: AppHandle) -> Result<(), String> {
-    ensure_practice(&app, true)
-}
-
-fn ensure_practice(app: &AppHandle, focus: bool) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("practice") {
-        window.show().map_err(|error| error.to_string())?;
-        if focus {
-            window.set_focus().map_err(|error| error.to_string())?;
-        }
-        return Ok(());
-    }
-    WebviewWindowBuilder::new(app, "practice", WebviewUrl::App("practice.html".into()))
-        .title(activity::PRACTICE_TITLE)
-        .focused(focus)
-        .inner_size(760.0, 600.0)
-        .min_inner_size(480.0, 360.0)
-        .build()
-        .map(|_| ())
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn open_preview(app: AppHandle, id: u64) -> Result<(), String> {
-    let controller = app.state::<AppState>().controller.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        controller.open_preview(&app, id, None).map(|_| ())
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-fn get_preview(state: State<AppState>) -> Result<activity::PreviewData, String> {
-    state
-        .controller
-        .preview
-        .lock()
-        .unwrap()
-        .clone()
-        .ok_or("No local preview is open.".into())
-}
-
-#[tauri::command]
-fn practice_done(
-    window: tauri::WebviewWindow,
-    state: State<AppState>,
-    id: u64,
-) -> Result<(), String> {
-    if window.label() != "practice"
-        || state.controller.practice_sequence.load(Ordering::SeqCst) != id
-    {
-        return Err("Unexpected practice action completion.".into());
-    }
-    state
-        .controller
-        .practice_completed
-        .store(id, Ordering::SeqCst);
-    Ok(())
-}
-
-#[tauri::command]
-fn practice_can_type(
-    window: tauri::WebviewWindow,
-    state: State<AppState>,
-    id: u64,
-    epoch: u64,
-) -> bool {
-    window.label() == "practice" && state.controller.can_type(id, epoch)
-}
-
-#[tauri::command]
 fn app_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
@@ -263,14 +145,6 @@ pub fn run() {
             is_active,
             app_version,
             activity_status,
-            list_windows,
-            get_configuration,
-            configure,
-            open_practice,
-            open_preview,
-            get_preview,
-            practice_done,
-            practice_can_type,
             get_preferences,
             update_preferences,
             updater::check_update,
@@ -288,13 +162,6 @@ pub fn run() {
                 .lock()
                 .unwrap()
                 .update(settings.preferences.schedule.clone());
-            match desktop::list_windows() {
-                Ok(windows) => {
-                    *controller.configuration.lock().unwrap() = settings.resolve(&windows)
-                }
-                Err(error) if load_error.is_none() => controller.report(app.handle(), &error),
-                Err(_) => {}
-            }
             app.manage(SettingsState {
                 path,
                 stored: std::sync::Mutex::new(settings),
@@ -379,19 +246,7 @@ fn spawn_scheduler(app: AppHandle) {
             let (intent, decision) = controller.schedule_decision(clock);
             match decision {
                 Some(Decision::Start) if !controller.running.load(Ordering::SeqCst) => {
-                    let result = (|| -> Result<(), String> {
-                        let windows = desktop::list_windows()?;
-                        let configuration = app
-                            .state::<SettingsState>()
-                            .stored
-                            .lock()
-                            .unwrap()
-                            .resolve(&windows);
-                        if configuration.practice {
-                            ensure_practice(&app, false)?;
-                        }
-                        controller.start_scheduled(&app, intent, configuration)
-                    })();
+                    let result = controller.start_scheduled(&app, intent);
                     if let Err(error) = result {
                         controller.fail_scheduled(&app, intent, &error);
                     }

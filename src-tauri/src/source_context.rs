@@ -19,6 +19,115 @@ fn host_matches(host: &str, base: &str) -> bool {
 }
 
 impl SourceKind {
+    pub fn can_activate(self) -> bool {
+        matches!(
+            self,
+            Self::Document
+                | Self::Notion
+                | Self::Jira
+                | Self::Repository
+                | Self::Calendar
+                | Self::Ide
+        )
+    }
+
+    pub fn can_scroll(self) -> bool {
+        self.can_activate()
+    }
+
+    pub fn can_browse(self) -> bool {
+        matches!(
+            self,
+            Self::Notion | Self::Jira | Self::Repository | Self::Calendar
+        )
+    }
+
+    pub fn browser_address(value: &str) -> Option<tauri::Url> {
+        if value.len() > 512 {
+            return None;
+        }
+        let value = if value.contains("://") {
+            value.to_owned()
+        } else {
+            format!("https://{value}")
+        };
+        let url = tauri::Url::parse(&value).ok()?;
+        (url.scheme() == "https" && url.username().is_empty() && url.password().is_none())
+            .then_some(url)
+    }
+
+    pub fn allows_link(self, current: &tauri::Url, candidate: &tauri::Url, visited: bool) -> bool {
+        if !visited
+            || !self.can_browse()
+            || candidate.scheme() != "https"
+            || candidate.origin() != current.origin()
+            || candidate.query().is_some()
+            || !candidate.username().is_empty()
+            || candidate.password().is_some()
+        {
+            return false;
+        }
+        self.allows_page(candidate)
+    }
+
+    pub fn allows_page(self, address: &tauri::Url) -> bool {
+        if address.scheme() != "https"
+            || address.query().is_some()
+            || !address.username().is_empty()
+            || address.password().is_some()
+        {
+            return false;
+        }
+        let parts: Vec<_> = address
+            .path()
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect();
+        match self {
+            Self::Repository => {
+                (parts.len() == 2
+                    && !matches!(
+                        parts[0],
+                        "notifications"
+                            | "settings"
+                            | "users"
+                            | "groups"
+                            | "dashboard"
+                            | "search"
+                            | "admin"
+                    ))
+                    || (parts.len() >= 4 && matches!(parts[2], "blob" | "tree"))
+                    || (parts.len() >= 5
+                        && parts
+                            .windows(2)
+                            .any(|pair| pair[0] == "-" && matches!(pair[1], "blob" | "tree")))
+            }
+            Self::Jira if parts.len() == 2 && parts[0] == "browse" => {
+                parts[1].rsplit_once('-').is_some_and(|(project, issue)| {
+                    !project.is_empty()
+                        && project
+                            .bytes()
+                            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+                        && !issue.is_empty()
+                        && issue.bytes().all(|b| b.is_ascii_digit())
+                })
+            }
+            Self::Notion
+                if parts.len() <= 2
+                    && !parts
+                        .iter()
+                        .any(|part| matches!(*part, "api" | "settings" | "login")) =>
+            {
+                parts.last().is_some_and(|part| {
+                    let id = part.rsplit('-').next().unwrap_or(part);
+                    id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit())
+                })
+            }
+            Self::Calendar => parts.first() == Some(&"calendar"),
+            _ => false,
+        }
+    }
+
     pub fn detect(domain: Option<&str>, application: &str) -> Self {
         if let Some(host) = domain {
             let host = host.to_ascii_lowercase();
@@ -44,8 +153,8 @@ impl SourceKind {
             "outlook" | "thunderbird" | "mail" => Self::Mail,
             "code" | "cursor" | "windsurf" | "idea64" | "pycharm64" | "webstorm64" | "rider64"
             | "clion64" | "goland64" | "rustrover64" => Self::Ide,
-            "notepad" | "textedit" | "gedit" | "kate" | "evince" | "okular" | "sumatrapdf"
-            | "acrord32" => Self::Document,
+            "notepad" | "winword" | "wordpad" | "excel" | "powerpnt" | "soffice" | "textedit"
+            | "gedit" | "kate" | "evince" | "okular" | "sumatrapdf" | "acrord32" => Self::Document,
             _ => Self::Unknown,
         }
     }
@@ -68,6 +177,70 @@ impl SourceKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_states_prevent_activating_or_scrolling_communication_views() {
+        for kind in [SourceKind::Mail, SourceKind::Chat, SourceKind::Unknown] {
+            assert!(!kind.can_activate());
+            assert!(!kind.can_scroll());
+            assert!(!kind.can_browse());
+        }
+        for kind in [
+            SourceKind::Document,
+            SourceKind::Ide,
+            SourceKind::Notion,
+            SourceKind::Jira,
+            SourceKind::Repository,
+            SourceKind::Calendar,
+        ] {
+            assert!(kind.can_activate());
+            assert!(kind.can_scroll());
+        }
+    }
+
+    #[test]
+    fn browsing_reuses_https_and_only_visits_known_read_only_links() {
+        let base = SourceKind::browser_address("github.com/team/project").unwrap();
+        let file =
+            tauri::Url::parse("https://github.com/team/project/blob/main/src/main.rs").unwrap();
+        assert!(SourceKind::Repository.allows_link(&base, &file, true));
+        assert!(!SourceKind::Repository.allows_link(&base, &file, false));
+        for address in [
+            "https://example.org/team/project/blob/main/file",
+            "https://github.com/logout",
+            "https://github.com/team/project/settings",
+            "https://github.com/team/project/blob/main/file?action=delete",
+        ] {
+            assert!(!SourceKind::Repository.allows_link(
+                &base,
+                &tauri::Url::parse(address).unwrap(),
+                true
+            ));
+        }
+        for address in [
+            "http://github.com/team/project",
+            "javascript:alert(1)",
+            "https://name:secret@github.com/team/project",
+        ] {
+            assert!(SourceKind::browser_address(address).is_none());
+        }
+        let gitlab =
+            tauri::Url::parse("https://gitlab.com/team/project/-/blob/main/src/main.rs").unwrap();
+        assert!(SourceKind::Repository.allows_link(&gitlab, &gitlab, true));
+        for address in [
+            "https://github.com/notifications",
+            "https://github.com/team/project/issues/1",
+            "https://workspace.notion.so/inbox",
+            "https://team.atlassian.net/settings",
+        ] {
+            let address = tauri::Url::parse(address).unwrap();
+            assert!(!SourceKind::detect(address.host_str(), "chrome.exe").allows_page(&address));
+        }
+        let jira = tauri::Url::parse("https://team.atlassian.net/browse/APP-10").unwrap();
+        assert!(SourceKind::Jira.allows_link(&jira, &jira, true));
+        assert!(!SourceKind::Mail.allows_link(&jira, &jira, true));
+        assert!(!SourceKind::Chat.allows_link(&jira, &jira, true));
+    }
 
     #[test]
     fn identifies_supported_services_without_accepting_lookalike_hosts() {

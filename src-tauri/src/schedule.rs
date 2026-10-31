@@ -172,14 +172,6 @@ impl Scheduler {
         self.running = false;
         true
     }
-    pub fn cancel_pending_start(&mut self) {
-        if self.running {
-            self.bound_shift = None;
-            self.last_started = None;
-            self.finish_at = None;
-            self.running = false;
-        }
-    }
     pub fn manual_start(&mut self, clock: LocalClock) {
         self.running = true;
         self.suppressed = None;
@@ -250,13 +242,11 @@ mod tests {
         assert_eq!(scheduler.tick(clock(2, "09:00")), Some(Decision::Start));
     }
     #[test]
-    fn changed_targets_retry_pending_start_without_revoking_manual_stop() {
+    fn repeated_discovery_ticks_do_not_duplicate_starts_or_revoke_manual_stop() {
         let mut scheduler = Scheduler::new(schedule("09:00", "17:00"));
         assert_eq!(scheduler.tick(clock(1, "09:00")), Some(Decision::Start));
-        scheduler.cancel_pending_start();
-        assert_eq!(scheduler.tick(clock(1, "09:01")), Some(Decision::Start));
+        assert_eq!(scheduler.tick(clock(1, "09:01")), None);
         scheduler.manual_stop(clock(1, "10:00"));
-        scheduler.cancel_pending_start();
         assert_eq!(scheduler.tick(clock(1, "10:01")), None);
     }
     fn clock(day: i64, time: &str) -> LocalClock {

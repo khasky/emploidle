@@ -74,3 +74,5 @@ for (let run = 0; run < 2; run++) {
     if (application?.id) process.kill(application.id);
   }
 }
+
+await import("./windows-desktop.mjs");

@@ -49,8 +49,14 @@ struct MouseEvent {
     time: u32,
     extra: usize,
 }
+#[repr(C)]
+struct LastInput {
+    size: u32,
+    tick: u32,
+}
 #[link(name = "user32")]
 extern "system" {
+    fn GetLastInputInfo(info: *mut LastInput) -> i32;
     fn EnumWindows(
         callback: unsafe extern "system" fn(Handle, isize) -> i32,
         parameter: isize,
@@ -75,6 +81,20 @@ extern "system" {
     fn UnhookWindowsHookEx(hook: Handle) -> i32;
     fn CallNextHookEx(hook: Handle, code: i32, wparam: usize, lparam: isize) -> isize;
     fn GetMessageW(message: *mut Message, window: Handle, minimum: u32, maximum: u32) -> i32;
+}
+
+pub fn last_input_tick() -> Result<u32, String> {
+    let mut info = LastInput {
+        size: std::mem::size_of::<LastInput>() as u32,
+        tick: 0,
+    };
+    if unsafe { GetLastInputInfo(&mut info) } == 0 {
+        return Err(format!(
+            "Cannot inspect physical input: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(info.tick)
 }
 #[link(name = "kernel32")]
 extern "system" {

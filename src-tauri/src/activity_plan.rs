@@ -1,17 +1,9 @@
 use rand::Rng;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Context {
-    Reading,
-    Preview,
-    Practice,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scenario {
     Reading,
     Reviewing,
-    Writing,
 }
 
 impl Scenario {
@@ -19,7 +11,6 @@ impl Scenario {
         match self {
             Self::Reading => "Reading",
             Self::Reviewing => "Reviewing",
-            Self::Writing => "Writing in practice document",
         }
     }
 }
@@ -30,32 +21,25 @@ pub enum Action {
     Move,
     Scroll(i32),
     HorizontalScroll(i32),
-    Page { up: bool },
-    Caret { back: bool },
-    SelectText,
-    ClickDocument,
-    Type,
 }
 
 pub struct Plan {
     pub scenario: Scenario,
     pub duration_ms: u64,
-    context: Context,
     pace: f64,
     last: Action,
 }
 
 impl Plan {
-    pub fn new(context: Context, rng: &mut impl Rng) -> Self {
-        let scenario = match context {
-            Context::Practice => Scenario::Writing,
-            _ if rng.random_bool(0.3) => Scenario::Reviewing,
-            _ => Scenario::Reading,
+    pub fn new(rng: &mut impl Rng) -> Self {
+        let scenario = if rng.random_bool(0.3) {
+            Scenario::Reviewing
+        } else {
+            Scenario::Reading
         };
         Self {
             scenario,
             duration_ms: rng.random_range(90_000..=240_000),
-            context,
             pace: rng.random_range(0.8..=1.3),
             last: Action::Pause,
         }
@@ -64,23 +48,10 @@ impl Plan {
     pub fn next(&mut self, rng: &mut impl Rng) -> (Action, u64) {
         self.pace = (self.pace * rng.random_range(0.94..=1.06)).clamp(0.7, 1.5);
         let roll = rng.random_range(0..100);
-        let action = if matches!(self.last, Action::Scroll(_) | Action::Page { .. })
-            && rng.random_bool(0.45)
-        {
+        let action = if matches!(self.last, Action::Scroll(_)) && rng.random_bool(0.45) {
             Action::Pause
         } else {
             match self.scenario {
-                Scenario::Writing => match roll {
-                    0..=44 => Action::Type,
-                    45..=58 => Action::Caret {
-                        back: rng.random_bool(0.6),
-                    },
-                    59..=66 => Action::SelectText,
-                    67..=72 => Action::ClickDocument,
-                    73..=82 => Action::Scroll(if rng.random_bool(0.7) { 1 } else { -1 }),
-                    83..=90 => Action::Move,
-                    _ => Action::Pause,
-                },
                 Scenario::Reviewing if roll < 15 => {
                     Action::HorizontalScroll(if rng.random_bool(0.5) { 1 } else { -1 })
                 }
@@ -90,31 +61,20 @@ impl Plan {
                     } else {
                         rng.random_range(1..=4)
                     }),
-                    50..=58 if self.context == Context::Preview => Action::Page {
-                        up: rng.random_bool(0.25),
-                    },
                     59..=75 => Action::Move,
                     _ => Action::Pause,
                 },
             }
         };
-        debug_assert!(self.context == Context::Practice || !is_editing(action));
         let pause = match action {
             Action::Pause if rng.random_bool(0.12) => rng.random_range(25_000..=75_000),
-            Action::Pause | Action::Page { .. } => rng.random_range(5_000..=18_000),
+            Action::Pause => rng.random_range(5_000..=18_000),
             Action::Scroll(_) => rng.random_range(2_000..=10_000),
             _ => rng.random_range(700..=3_500),
         };
         self.last = action;
         (action, (pause as f64 * self.pace) as u64)
     }
-}
-
-pub fn is_editing(action: Action) -> bool {
-    matches!(
-        action,
-        Action::Caret { .. } | Action::SelectText | Action::ClickDocument | Action::Type
-    )
 }
 
 pub fn pointer_path(
@@ -150,17 +110,17 @@ mod tests {
     use rand::{rngs::StdRng, SeedableRng};
 
     #[test]
-    fn editing_stays_in_practice_and_page_keys_in_local_previews() {
+    fn plans_only_issue_reading_actions_with_positive_pauses() {
         let mut rng = StdRng::seed_from_u64(8);
-        for context in [Context::Reading, Context::Preview, Context::Practice] {
-            for _ in 0..20 {
-                let mut plan = Plan::new(context, &mut rng);
-                for _ in 0..200 {
-                    let (action, pause) = plan.next(&mut rng);
-                    assert!(pause > 0);
-                    assert!(context == Context::Practice || !is_editing(action));
-                    assert!(context == Context::Preview || !matches!(action, Action::Page { .. }));
-                }
+        for _ in 0..60 {
+            let mut plan = Plan::new(&mut rng);
+            for _ in 0..200 {
+                let (action, pause) = plan.next(&mut rng);
+                assert!(pause > 0);
+                assert!(matches!(
+                    action,
+                    Action::Pause | Action::Move | Action::Scroll(_) | Action::HorizontalScroll(_)
+                ));
             }
         }
     }
@@ -168,7 +128,7 @@ mod tests {
     #[test]
     fn external_reading_never_issues_navigation_or_editing_keys() {
         let mut rng = StdRng::seed_from_u64(12);
-        let mut plan = Plan::new(Context::Reading, &mut rng);
+        let mut plan = Plan::new(&mut rng);
         for _ in 0..1000 {
             let (action, _) = plan.next(&mut rng);
             assert!(matches!(
@@ -181,7 +141,7 @@ mod tests {
     #[test]
     fn scrolling_and_pauses_vary_without_mandatory_return_to_top() {
         let mut rng = StdRng::seed_from_u64(19);
-        let mut plan = Plan::new(Context::Reading, &mut rng);
+        let mut plan = Plan::new(&mut rng);
         let actions: Vec<_> = (0..1000).map(|_| plan.next(&mut rng)).collect();
         assert!(actions
             .iter()
