@@ -739,6 +739,14 @@ fn choose_target(
     targets[rng.random_range(0..targets.len())]
 }
 
+fn eligible_targets(targets: &[(u64, Context)], foreground: Option<u64>) -> Vec<(u64, Context)> {
+    targets
+        .iter()
+        .copied()
+        .filter(|(id, context)| *context != Context::Reading || Some(*id) == foreground)
+        .collect()
+}
+
 pub fn spawn_worker(controller: Arc<Controller>, app: AppHandle) {
     thread::spawn(move || {
         let mut rng = rand::rng();
@@ -783,9 +791,10 @@ pub fn spawn_worker(controller: Arc<Controller>, app: AppHandle) {
                 }
                 let configuration = controller.configuration.lock().unwrap().clone();
                 let targets = available_targets(&configuration).map_err(StepError::Failed)?;
+                let targets = eligible_targets(&targets, desktop::foreground_window());
                 if targets.is_empty() {
                     return Err(StepError::Failed(
-                        "No allowed windows remain. Choose a window and start again.".into(),
+                        "No allowed activity window is ready. Activate a selected Reading window, choose Local preview or enable the practice document.".into(),
                     ));
                 }
                 let (source_window, context) = choose_target(&targets, current, previous, &mut rng);
@@ -893,6 +902,20 @@ pub fn spawn_worker(controller: Arc<Controller>, app: AppHandle) {
 mod tests {
     use super::*;
     use rand::{rngs::StdRng, SeedableRng};
+
+    #[test]
+    fn inactive_external_windows_do_not_interrupt_local_scenarios() {
+        let targets = [
+            (1, Context::Reading),
+            (2, Context::Reading),
+            (3, Context::Practice),
+            (4, Context::Preview),
+        ];
+        assert_eq!(eligible_targets(&targets, Some(2)), targets[1..]);
+        assert_eq!(eligible_targets(&targets, Some(3)), targets[2..]);
+        assert_eq!(eligible_targets(&targets, None), targets[2..]);
+        assert!(eligible_targets(&targets[..2], Some(3)).is_empty());
+    }
 
     #[test]
     fn preference_updates_preserve_intent_and_configuration_changes_retry_pending_start() {
