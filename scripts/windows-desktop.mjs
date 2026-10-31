@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
+import {
+  automationRequest,
+  focusWindow,
+  inputTick,
+} from "./lib/windows-automation.mjs";
 import mockTauri from "./screenshots/tauri-mock.mjs";
 
 assert.equal(process.platform, "win32", "Desktop integration requires Windows");
@@ -36,47 +40,9 @@ try {
     ),
   );
   assert.ok(handle?.window, "The owned browser window was not found");
-  const helper = readFileSync(
-    "src-tauri/src/desktop/accessibility.ps1",
-    "utf8",
-  );
-  const inputTick = () =>
-    Number(
-      execFileSync(
-        "powershell.exe",
-        [
-          "-NoProfile",
-          "-NonInteractive",
-          "-Command",
-          `
-      Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public static class NativeInput {
-    [StructLayout(LayoutKind.Sequential)] private struct State { public uint Size; public uint Tick; }
-    [DllImport("user32.dll")] private static extern bool GetLastInputInfo(ref State state);
-    public static uint Tick() { var state = new State { Size = 8 }; if (!GetLastInputInfo(ref state)) throw new Exception("Cannot read input tick"); return state.Tick; }
-}
-'@
-      [NativeInput]::Tick()
-    `,
-        ],
-        { encoding: "utf8", windowsHide: true },
-      ),
-    );
+  focusWindow(handle);
   const request = (operation, acknowledge = true) =>
-    JSON.parse(
-      execFileSync(
-        "powershell.exe",
-        ["-NoProfile", "-NonInteractive", "-Command", helper],
-        {
-          input: `${JSON.stringify({ ...handle, input_tick: inputTick(), ...operation })}\n${acknowledge ? "commit\n" : ""}`,
-          encoding: "utf8",
-          windowsHide: true,
-          timeout: 3_000,
-        },
-      ),
-    );
+    automationRequest(handle, operation, acknowledge);
   const run = (operation) => {
     const response = request(operation);
     assert.ok(response.ok, response.error);

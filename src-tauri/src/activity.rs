@@ -19,6 +19,8 @@ pub struct Controller {
     status: Mutex<String>,
     input_epoch: AtomicU64,
     last_input: Mutex<Instant>,
+    input_paused: AtomicBool,
+    stopped_by_user: AtomicBool,
     pub main_visible: AtomicBool,
     pub scheduler: Mutex<Scheduler>,
     pub intent_epoch: AtomicU64,
@@ -32,6 +34,8 @@ impl Controller {
             status: Mutex::new("Idle".into()),
             input_epoch: AtomicU64::new(0),
             last_input: Mutex::new(Instant::now()),
+            input_paused: AtomicBool::new(false),
+            stopped_by_user: AtomicBool::new(false),
             main_visible: AtomicBool::new(false),
             scheduler: Mutex::new(Scheduler::new(Schedule::default())),
             intent_epoch: AtomicU64::new(0),
@@ -53,6 +57,7 @@ impl Controller {
 
     pub fn stop(&self, app: &AppHandle) {
         let _intent = self.intent_lock.lock().unwrap();
+        self.stopped_by_user.store(true, Ordering::SeqCst);
         self.intent_epoch.fetch_add(1, Ordering::SeqCst);
         if let Ok(clock) = LocalClock::now() {
             self.scheduler.lock().unwrap().manual_stop(clock);
@@ -63,6 +68,7 @@ impl Controller {
     pub fn stop_for_schedule(&self, app: &AppHandle, expected_intent: u64) {
         let _intent = self.intent_lock.lock().unwrap();
         if self.intent_epoch.load(Ordering::SeqCst) == expected_intent {
+            self.stopped_by_user.store(false, Ordering::SeqCst);
             self.stop_activity(app);
         }
     }
@@ -105,16 +111,44 @@ impl Controller {
         self.input_epoch.fetch_add(1, Ordering::SeqCst);
         let _ = app.emit("running-changed", false);
         self.report(app, "Idle");
+        self.refresh_tray(app);
     }
 
     fn user_input(&self) {
         *self.last_input.lock().unwrap() = Instant::now();
+        self.input_paused.store(true, Ordering::SeqCst);
         self.input_epoch.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(crate) fn tray_status(&self) -> crate::tray_status::Status {
+        use crate::tray_status::Status;
+        if !self.running.load(Ordering::SeqCst) {
+            return if self.stopped_by_user.load(Ordering::SeqCst) {
+                Status::Paused
+            } else {
+                Status::Idle
+            };
+        }
+        if self.main_visible.load(Ordering::SeqCst)
+            || (self.input_paused.load(Ordering::SeqCst)
+                && self.last_input.lock().unwrap().elapsed() < USER_PAUSE)
+        {
+            Status::Paused
+        } else {
+            Status::Active
+        }
+    }
+
+    fn refresh_tray(&self, app: &AppHandle) {
+        if let Err(error) = crate::tray_status::update(app, self.tray_status()) {
+            self.report(app, &format!("Cannot update tray icon: {error}"));
+        }
     }
 
     pub fn set_main_visible(&self, app: &AppHandle, visible: bool) {
         self.main_visible.store(visible, Ordering::SeqCst);
         self.input_epoch.fetch_add(1, Ordering::SeqCst);
+        self.refresh_tray(app);
         if self.running.load(Ordering::SeqCst) {
             self.report(
                 app,
@@ -177,7 +211,10 @@ impl Controller {
             Arc::new(move || stop_controller.stop(&stop_app)),
         )?;
         self.user_input();
+        self.input_paused.store(false, Ordering::SeqCst);
+        self.stopped_by_user.store(false, Ordering::SeqCst);
         self.running.store(true, Ordering::SeqCst);
+        self.refresh_tray(app);
         self.report(
             app,
             if self.main_visible.load(Ordering::SeqCst) {
@@ -304,14 +341,16 @@ fn smooth_point(
         .location()
         .map_err(|error| StepError::Failed(error.to_string()))?;
     let end = (x, y);
-    let steps = rng.random_range(24..=48);
+    let distance = f64::from(end.0 - start.0).hypot(f64::from(end.1 - start.1));
+    let duration = (120.0 + distance * 0.25).clamp(130.0, 450.0) as u64;
+    let steps = (duration / 10) as usize;
     let path = activity_plan::pointer_path(start, end, rng.random_range(-0.18..=0.18), steps);
     for point in path {
         guard.input(|| e.move_mouse(point.0, point.1, Coordinate::Abs))?;
-        guard.wait(Duration::from_millis(rng.random_range(8..=16)))?;
+        guard.wait(Duration::from_millis(rng.random_range(8..=12)))?;
     }
     if rng.random_bool(0.25) {
-        guard.wait(Duration::from_millis(rng.random_range(100..=250)))?;
+        guard.wait(Duration::from_millis(rng.random_range(35..=90)))?;
         guard.input(|| {
             e.move_mouse(
                 x + rng.random_range(-3..=3),
@@ -384,17 +423,18 @@ fn external_action(
                 && row.x.saturating_add(row.width) <= bounds.x.saturating_add(bounds.width) - 16
                 && row.y.saturating_add(row.height) <= bounds.y.saturating_add(bounds.height) - 16
         })
+        .copied()
         .collect();
-    if rows.is_empty() {
-        return smooth_move(e, guard, bounds, rng);
+    if bounds.width < 120 || bounds.height < 120 {
+        return Err(StepError::Failed(
+            "The window is too small for cursor activity.".into(),
+        ));
     }
-    let row = rows[rng.random_range(0..rows.len())];
-    smooth_point(
-        e,
-        guard,
-        (row.x + row.width / 2, row.y + row.height / 2),
-        rng,
-    )
+    for point in activity_plan::pointer_route(bounds, &rows, rng) {
+        smooth_point(e, guard, point, rng)?;
+        guard.wait(Duration::from_millis(rng.random_range(45..=150)))?;
+    }
+    Ok(())
 }
 
 fn choose_target(
@@ -422,6 +462,31 @@ fn choose_target(
         }
     }
     targets[rng.random_range(0..targets.len())]
+}
+
+fn review_editor(
+    e: &mut Enigo,
+    guard: &Guard<'_>,
+    source: &desktop::WindowInfo,
+    rng: &mut impl Rng,
+) -> StepResult {
+    guard.check()?;
+    let Some(session) = desktop::begin_editor_review(source.id, source.process_id, rng.random())
+        .map_err(StepError::RestorationFailed)?
+    else {
+        return Ok(());
+    };
+    let result = (|| {
+        guard.wait(Duration::from_millis(rng.random_range(300..=650)))?;
+        let snapshot = desktop::inspect_window(source.id, source.process_id).ok();
+        external_action(Action::Move, e, guard, source, snapshot.as_ref(), rng)?;
+        guard.wait(Duration::from_millis(rng.random_range(400..=1_100)))
+    })();
+    let interrupted = !guard.controller.session_valid(guard.epoch);
+    let restored =
+        desktop::restore_editor_review(source.id, source.process_id, session, interrupted)
+            .map_err(StepError::RestorationFailed);
+    restored.and(result)
 }
 
 fn review_browser(
@@ -496,6 +561,7 @@ pub fn spawn_worker(controller: Arc<Controller>, app: AppHandle) {
         let mut current = None;
         let mut previous = None;
         loop {
+            controller.refresh_tray(&app);
             if !controller.running.load(Ordering::SeqCst) {
                 enigo = None;
                 current = None;
@@ -583,17 +649,21 @@ pub fn spawn_worker(controller: Arc<Controller>, app: AppHandle) {
                 if let (Some(source), Some(snapshot)) = (&source, &snapshot) {
                     if SourceKind::detect(snapshot.domain.as_deref(), &source.application)
                         == SourceKind::Ide
-                        && rng.random_bool(0.4)
                     {
-                        guard.check()?;
-                        let _ = desktop::review_tree(source.id, source.process_id, rng.random())
-                            .map_err(StepError::RestorationFailed)?;
+                        if rng.random_bool(0.35) {
+                            guard.check()?;
+                            let _ =
+                                desktop::review_tree(source.id, source.process_id, rng.random())
+                                    .map_err(StepError::RestorationFailed)?;
+                        }
+                        if rng.random_bool(0.8) {
+                            review_editor(e, &guard, source, &mut rng)?;
+                        }
                     }
                     if rng.random_bool(0.3) {
                         review_browser(e, &guard, source, snapshot, &mut rng)?;
                     }
                 }
-                let mut plan = Plan::new(&mut rng);
                 let kind = SourceKind::detect(
                     snapshot
                         .as_ref()
@@ -602,6 +672,12 @@ pub fn spawn_worker(controller: Arc<Controller>, app: AppHandle) {
                         .as_ref()
                         .map_or("", |source| source.application.as_str()),
                 );
+                let can_scroll = kind.can_scroll()
+                    && snapshot
+                        .as_ref()
+                        .and_then(|snapshot| snapshot.scroll.as_ref())
+                        .is_some_and(|scroll| scroll.vertical >= 0.0 || scroll.horizontal >= 0.0);
+                let mut plan = Plan::new(can_scroll, &mut rng);
                 controller.report(
                     &app,
                     &format!("{}: {}", plan.scenario.label(), kind.label()),
@@ -613,7 +689,9 @@ pub fn spawn_worker(controller: Arc<Controller>, app: AppHandle) {
                         StepError::Failed("The window is no longer available.".into())
                     })?;
                     external_action(action, e, &guard, source, snapshot.as_ref(), &mut rng)?;
-                    guard.wait(Duration::from_millis(pause))?;
+                    let remaining =
+                        Duration::from_millis(plan.duration_ms).saturating_sub(started.elapsed());
+                    guard.wait(Duration::from_millis(pause).min(remaining))?;
                 }
                 Ok(())
             })();
@@ -640,6 +718,26 @@ pub fn spawn_worker(controller: Arc<Controller>, app: AppHandle) {
 mod tests {
     use super::*;
     use rand::{rngs::StdRng, SeedableRng};
+
+    #[test]
+    fn tray_distinguishes_running_input_pause_manual_stop_and_schedule_finish() {
+        use crate::tray_status::Status;
+        let controller = Controller::new();
+        assert_eq!(controller.tray_status(), Status::Idle);
+        controller.running.store(true, Ordering::SeqCst);
+        assert_eq!(controller.tray_status(), Status::Active);
+        controller.user_input();
+        assert_eq!(controller.tray_status(), Status::Paused);
+        *controller.last_input.lock().unwrap() = Instant::now() - USER_PAUSE;
+        assert_eq!(controller.tray_status(), Status::Active);
+        controller.main_visible.store(true, Ordering::SeqCst);
+        assert_eq!(controller.tray_status(), Status::Paused);
+        controller.running.store(false, Ordering::SeqCst);
+        controller.stopped_by_user.store(true, Ordering::SeqCst);
+        assert_eq!(controller.tray_status(), Status::Paused);
+        controller.stopped_by_user.store(false, Ordering::SeqCst);
+        assert_eq!(controller.tray_status(), Status::Idle);
+    }
 
     #[test]
     fn all_external_windows_are_discovered_without_saved_permissions() {

@@ -24,9 +24,9 @@ A desktop anti-idle activity simulator with automatic window discovery, varied c
 
 ## Features
 
-- **Varied activity.** Reading and reviewing scenarios last 90–240 seconds, with curved cursor paths, small corrections, reading pauses and occasional longer breaks.
+- **Varied activity.** Cursor routes visit 3–6 different areas in sequence. Scenarios without restorable scrolling use brief pauses and 8–18 second window budgets; reading scenarios use 18–40 second budgets with longer reading pauses. Recently used windows are revisited.
 - **Automatic window discovery.** Open applications become available automatically, without window lists, permissions to configure or practice documents.
-- **Application-aware actions on Windows.** Hover over accessible content, scroll supported document controls and restore their position, temporarily review supported browser pages in an owned tab, or expand and collapse an IDE folder.
+- **Application-aware actions on Windows.** Hover over accessible content, scroll supported document controls and restore their position, temporarily review supported browser pages in an owned tab, or review VS Code sidebars, project files and folders.
 - **Pauses for your input.** Physical keyboard or mouse activity interrupts the simulation. It resumes after 8 seconds without physical input; a global shortcut stops it immediately.
 - **Daily schedule.** Set start and finish times, including overnight shifts, and optionally launch Emploidle at login.
 - **Tray controls and updates.** Start, stop or reopen the window from the tray. Builds with updater support offer signed updates with download progress and a restart button.
@@ -92,12 +92,12 @@ Install a build containing the updater manually once. Earlier builds cannot upda
 | Open foreground windows | Curved cursor movement and hovering; accessible content rows are preferred. |
 | Recognized document apps, supported sites and IDEs on Windows | Focus the window and scroll native accessibility controls, restoring the original scroll position after reading. |
 | Notion, Jira, GitHub/GitLab and Google Calendar in supported Chromium browsers | Review the current address in a temporary tab; visited same-site document, ticket and code links are eligible where their URL matches a supported viewing route. Close only the tab created by Emploidle and return to the original tab. |
-| IDEs exposing native expandable trees on Windows | Temporarily expand a collapsed folder and collapse it again. |
+| VS Code and compatible editors exposing supported Windows accessibility controls | Review Explorer or Extensions and restore the sidebar; temporarily open a visible text file and close only its created tab; expand and collapse project folders. File opening is skipped with preview tabs, ambiguous layouts or multiple editor groups. |
 | Mail, chat and unrecognized applications | Hover only in an already active window. No automatic activation, message opening or scrolling that could mark messages as read. |
 
 Actions depend on the controls exposed by each application. Unsupported actions are skipped. If a view changes concurrently, its newer position is preserved; a failed restoration stops further activity. Opening a temporary page can still affect the site's viewing history or activity log.
 
-Comment entry, mail drafts, unread-channel navigation, extension panels and arbitrary project-file opening are currently unsupported. Emploidle does not type into external documents or forms, or substitute local practice documents for these operations.
+Comment entry, mail drafts and unread-channel navigation are currently unsupported. Emploidle does not type into external documents or forms, or substitute local practice documents for these operations.
 
 ### Window and tray controls
 
@@ -107,6 +107,9 @@ Comment entry, mail drafts, unread-channel navigation, extension panels and arbi
 | Close or minimize the main window to the tray | Running activity resumes. |
 | Tray → **Show window**, **Start** or **Stop** | Control activity without leaving Emploidle open on the desktop. |
 | Tray → **Quit** | Exit the application. |
+| Green tray icon | Activity is enabled, including scheduled runs. |
+| Orange tray icon | Paused for physical input, the open main window or a manual Stop. |
+| Original blue tray icon | Not yet started or stopped automatically at the scheduled finish. |
 
 Open windows are rediscovered between scenarios. Closed or unavailable windows are skipped; recently used windows are revisited with varied timing. Physical input interrupts the current scenario.
 
@@ -168,6 +171,16 @@ cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D w
 cargo test --locked --manifest-path src-tauri/Cargo.toml
 ```
 
+Native Windows checks require an unlocked desktop without simultaneous keyboard or mouse input. After building the debug application, run:
+
+```powershell
+pnpm build:desktop --debug --ci --no-bundle -- -- --locked
+pnpm test:windows
+node scripts/windows-vscode.mjs
+```
+
+The VS Code check requires an installed editor. It uses a separate workspace, profile, shared-data directory and extension directory, with extensions and autosave disabled; the verification process is closed afterward.
+
 ### Versioning and releases
 
 Commit messages and pull request titles follow [Conventional Commits](CONTRIBUTING.md#commit-messages). `pnpm release` derives the next version and [CHANGELOG.md](CHANGELOG.md) from commits, synchronizing `package.json`, Tauri's config and both Cargo files through [.versionrc.json](.versionrc.json).
@@ -179,7 +192,7 @@ Run `pnpm check:versions` to check version parity, or `pnpm release --dry-run` t
 <details>
 <summary><b>Native activity and restoration</b></summary>
 
-Windows accessibility inspection identifies visible controls, browser domains, scroll percentages and native element identities. Scrolling records the exact control and its before/after positions; restoration proceeds only while the view still matches the action's result. Tab cleanup addresses the created tab by its native runtime identity and preserves a user-selected different tab.
+Windows accessibility inspection identifies visible controls, browser domains, scroll percentages and native element identities. Scrolling records the exact control and its before/after positions; restoration proceeds only while the view still matches the action's result. Tab cleanup addresses the created tab by its native runtime identity and preserves a user-selected different tab. VS Code reviews use the same native identities to restore the sidebar and editor selection, avoid replacing preexisting preview tabs, and preserve an editor if it has acquired user edits.
 
 Browser routes are limited to HTTPS pages on the same origin. Link transitions require a visited link and a recognized document, ticket or code path. Mail and chat are excluded from activation and navigation to preserve message read states. No extension or service credentials are required.
 

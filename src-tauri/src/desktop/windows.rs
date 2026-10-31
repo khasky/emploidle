@@ -69,6 +69,8 @@ extern "system" {
     fn GetForegroundWindow() -> Handle;
     fn GetAsyncKeyState(key: i32) -> i16;
     fn SetForegroundWindow(window: Handle) -> i32;
+    fn BringWindowToTop(window: Handle) -> i32;
+    fn AttachThreadInput(from: u32, to: u32, attach: i32) -> i32;
     fn ShowWindow(window: Handle, command: i32) -> i32;
     fn GetClientRect(window: Handle, rect: *mut Rect) -> i32;
     fn ClientToScreen(window: Handle, point: *mut Point) -> i32;
@@ -107,6 +109,7 @@ extern "system" {
     ) -> i32;
     fn CloseHandle(handle: Handle) -> i32;
     fn GetModuleHandleW(name: *const u16) -> Handle;
+    fn GetCurrentThreadId() -> u32;
 }
 
 unsafe extern "system" fn collect(window: Handle, parameter: isize) -> i32 {
@@ -163,6 +166,7 @@ pub fn pointer_button_down() -> bool {
 }
 pub fn focus_window(id: u64) -> Result<(), String> {
     let window = id as usize as Handle;
+    let input_tick = last_input_tick()?;
     unsafe {
         if IsWindow(window) == 0 {
             return Err("Selected window is closed".into());
@@ -170,11 +174,41 @@ pub fn focus_window(id: u64) -> Result<(), String> {
         if GetForegroundWindow() == window {
             return Ok(());
         }
+        if (1..256).any(|key| GetAsyncKeyState(key) < 0) {
+            return Err("Window switching was interrupted by a held key or mouse button".into());
+        }
         if IsIconic(window) != 0 {
             ShowWindow(window, 9);
         }
-        if SetForegroundWindow(window) == 0 {
-            return Err("Windows refused to focus the selected window".into());
+        if SetForegroundWindow(window) != 0 {
+            return Ok(());
+        }
+        let current = GetCurrentThreadId();
+        let foreground = GetWindowThreadProcessId(GetForegroundWindow(), ptr::null_mut());
+        let target = GetWindowThreadProcessId(window, ptr::null_mut());
+        let foreground_attached = foreground != 0
+            && foreground != current
+            && AttachThreadInput(current, foreground, 1) != 0;
+        let target_attached = target != 0
+            && target != current
+            && target != foreground
+            && AttachThreadInput(current, target, 1) != 0;
+        let unchanged = last_input_tick().is_ok_and(|tick| tick == input_tick);
+        if unchanged {
+            BringWindowToTop(window);
+            SetForegroundWindow(window);
+        }
+        if target_attached {
+            AttachThreadInput(current, target, 0);
+        }
+        if foreground_attached {
+            AttachThreadInput(current, foreground, 0);
+        }
+        if !unchanged || GetForegroundWindow() != window {
+            return Err(
+                "Windows refused to focus the selected window, or user input interrupted switching"
+                    .into(),
+            );
         }
     }
     Ok(())

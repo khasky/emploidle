@@ -63,6 +63,49 @@ pub struct BrowserSession {
     pub original: Vec<i32>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EditorSession {
+    original_view: Vec<i32>,
+    target_view: Vec<i32>,
+    original_focus: Option<Vec<i32>>,
+    original_editor: Option<Vec<i32>>,
+    created_editor: Option<Vec<i32>>,
+    tree_selection: Vec<Vec<i32>>,
+}
+
+pub fn begin_editor_review(
+    window: u64,
+    process_id: u32,
+    action: u32,
+) -> Result<Option<EditorSession>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        accessibility::begin_editor(window, process_id, action)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, process_id, action);
+        Ok(None)
+    }
+}
+
+pub fn restore_editor_review(
+    window: u64,
+    process_id: u32,
+    session: EditorSession,
+    interrupted: bool,
+) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        accessibility::restore_editor(window, process_id, session, interrupted)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, process_id, session, interrupted);
+        Ok(())
+    }
+}
+
 pub fn browser_context(window: u64, process_id: u32) -> Result<BrowserContext, String> {
     #[cfg(target_os = "windows")]
     {

@@ -1,6 +1,5 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-[Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 
 function Pattern($element, $identifier) {
@@ -24,8 +23,8 @@ function SameElement($element, $runtimeId) {
     return [System.Windows.Automation.Automation]::Compare([int[]]$element.GetRuntimeId(), [int[]]$runtimeId)
 }
 
-function Respond($data) {
-    @{ ok = $true; data = $data } | ConvertTo-Json -Depth 12 -Compress | ForEach-Object { [Console]::Out.WriteLine($_) }
+function Respond($data, [bool]$commitRequired = $false) {
+    @{ ok = $true; data = $data; commit_required = $commitRequired } | ConvertTo-Json -Depth 12 -Compress | ForEach-Object { [Console]::Out.WriteLine($_) }
 }
 
 function WaitScrollPosition($element, $pattern, $before, [bool]$requireChange, [bool]$monitorInput = $false) {
@@ -129,7 +128,7 @@ try {
     Add-Type -AssemblyName UIAutomationClient
     Add-Type -AssemblyName UIAutomationTypes
     $request = [Console]::In.ReadLine() | ConvertFrom-Json
-    if ($request.operation -in @('scroll', 'open_tab', 'close_tab', 'review_tree')) {
+    if ($request.operation -in @('scroll', 'open_tab', 'close_tab', 'review_tree', 'begin_editor', 'restore_editor')) {
         Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -150,10 +149,12 @@ public static class EmploidleDesktop {
     }
     $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]([long]$request.window))
     if ($null -eq $root -or $root.Current.ProcessId -ne [int]$request.process_id -or
-        ($root.Current.IsOffscreen -and $request.operation -notin @('restore', 'close_tab'))) {
+        ($root.Current.IsOffscreen -and $request.operation -notin @('restore', 'close_tab', 'restore_editor'))) {
         throw 'The selected window is unavailable or belongs to a different process'
     }
     $rootRect = $root.Current.BoundingRectangle
+    if ($request.operation -eq 'begin_editor') { BeginEditor $root ([uint32]$request.action); exit }
+    if ($request.operation -eq 'restore_editor') { RestoreEditor $root $request.session ([bool]$request.interrupted); Respond $true; exit }
     if ($request.operation -in @('browser_context', 'open_tab', 'close_tab')) {
         if ($request.operation -eq 'close_tab') {
             CloseOwnedTab $root $request.session.created $request.session.original
@@ -189,7 +190,7 @@ public static class EmploidleDesktop {
                     if ($null -eq $owned) { throw 'The created browser tab could not be identified' }
                     $committed = $false
                     try {
-                        Respond @{ created = @($owned); original = @($original) }
+                        Respond @{ created = @($owned); original = @($original) } $true
                         $committed = [Console]::In.ReadLine() -eq 'commit'
                     } finally {
                         if (-not $committed) { CloseOwnedTab $root $owned $original }
@@ -213,33 +214,7 @@ public static class EmploidleDesktop {
         [System.Windows.Automation.AutomationElement]::IsOffscreenProperty, $false)
     $condition = if ($request.operation -eq 'restore') { [System.Windows.Automation.Condition]::TrueCondition } else { $visible }
     $elements = $root.FindAll($scope, $condition)
-    if ($request.operation -eq 'review_tree') {
-        $folders = [Collections.Generic.List[object]]::new()
-        for ($index = 0; $index -lt [Math]::Min($elements.Count, 500); $index++) {
-            $element = $elements.Item($index)
-            if ($element.Current.ControlType -ne [System.Windows.Automation.ControlType]::TreeItem) { continue }
-            $pattern = Pattern $element ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
-            if ($null -ne $pattern -and $pattern.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Collapsed) { $folders.Add($pattern) }
-        }
-        if ($folders.Count -eq 0) { Respond $false; exit }
-        $pattern = $folders.Item([int]([uint32]$request.index % [uint32]$folders.Count))
-        CheckInput
-        try {
-            $pattern.Expand()
-            $timer = [Diagnostics.Stopwatch]::StartNew()
-            while ($timer.ElapsedMilliseconds -lt 450) {
-                CheckInput
-                Start-Sleep -Milliseconds 15
-            }
-        } finally {
-            if ($pattern.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded) { $pattern.Collapse() }
-        }
-        $timer = [Diagnostics.Stopwatch]::StartNew()
-        while ($pattern.Current.ExpandCollapseState -ne [System.Windows.Automation.ExpandCollapseState]::Collapsed -and $timer.ElapsedMilliseconds -lt 700) { Start-Sleep -Milliseconds 10 }
-        if ($pattern.Current.ExpandCollapseState -ne [System.Windows.Automation.ExpandCollapseState]::Collapsed) { throw 'The folder did not return to its original collapsed state' }
-        Respond $true
-        exit
-    }
+    if ($request.operation -eq 'review_tree') { ReviewEditorTree $root ([uint32]$request.index); exit }
     $scrollElement = $null
     $scrollPattern = $null
     $largestArea = 0
@@ -288,7 +263,7 @@ public static class EmploidleDesktop {
                     CheckInput
                     $after = $candidate
                 }
-                Respond @{ before = $before; after = $after }
+                Respond @{ before = $before; after = $after } $true
                 $committed = [Console]::In.ReadLine() -eq 'commit'
             } finally {
                 if (-not $committed) { RestoreScroll $scrollElement $scrollPattern $before $after }

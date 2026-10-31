@@ -6,6 +6,7 @@ mod preferences;
 mod process_name;
 mod schedule;
 mod source_context;
+mod tray_status;
 mod updater;
 
 use std::sync::atomic::Ordering;
@@ -169,16 +170,15 @@ pub fn run() {
             if let Some(error) = load_error {
                 controller.report(app.handle(), &error);
             }
-            activity::spawn_worker(controller.clone(), app.handle().clone());
-            spawn_scheduler(app.handle().clone());
             let show = MenuItem::with_id(app, "show", "Show window", true, None::<&str>)?;
             let start = MenuItem::with_id(app, "start", "Start", true, None::<&str>)?;
             let stop = MenuItem::with_id(app, "stop", "Stop", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &start, &stop, &quit])?;
 
+            let tray_icons = tray_status::Icons::new()?;
             TrayIconBuilder::with_id("main")
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tray_icons.idle())
                 .tooltip(&process_name)
                 .menu(&menu)
                 .show_menu_on_left_click(true)
@@ -209,6 +209,9 @@ pub fn run() {
                     _ => {}
                 })
                 .build(app)?;
+            app.manage(tray_icons);
+            activity::spawn_worker(controller, app.handle().clone());
+            spawn_scheduler(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {

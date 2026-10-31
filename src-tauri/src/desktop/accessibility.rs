@@ -1,4 +1,4 @@
-use super::{BrowserContext, BrowserSession, ScrollReceipt, Snapshot};
+use super::{BrowserContext, BrowserSession, EditorSession, ScrollReceipt, Snapshot};
 use serde::{Deserialize, Serialize};
 use std::{
     io::{Read, Write},
@@ -21,12 +21,28 @@ struct Request {
 #[serde(tag = "operation", rename_all = "snake_case")]
 enum Operation {
     Inspect,
-    Scroll { horizontal: bool, amount: i32 },
-    Restore { receipt: ScrollReceipt },
+    Scroll {
+        horizontal: bool,
+        amount: i32,
+    },
+    Restore {
+        receipt: ScrollReceipt,
+    },
     BrowserContext,
     OpenTab,
-    CloseTab { session: BrowserSession },
-    ReviewTree { index: u32 },
+    CloseTab {
+        session: BrowserSession,
+    },
+    ReviewTree {
+        index: u32,
+    },
+    BeginEditor {
+        action: u32,
+    },
+    RestoreEditor {
+        session: EditorSession,
+        interrupted: bool,
+    },
 }
 
 #[derive(Deserialize)]
@@ -34,6 +50,8 @@ struct Response<T> {
     ok: bool,
     data: Option<T>,
     error: Option<String>,
+    #[serde(default)]
+    commit_required: bool,
 }
 
 fn drain(
@@ -68,10 +86,6 @@ fn run<T: for<'de> Deserialize<'de>>(request: Request) -> Result<T, String> {
         request: Request,
         input_tick: u32,
     }
-    let needs_ack = matches!(
-        request.operation,
-        Operation::Scroll { .. } | Operation::OpenTab
-    );
     let mutating = !matches!(
         request.operation,
         Operation::Inspect | Operation::BrowserContext
@@ -87,7 +101,7 @@ fn run<T: for<'de> Deserialize<'de>>(request: Request) -> Result<T, String> {
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            include_str!("accessibility.ps1"),
+            "[Console]::InputEncoding = [Text.UTF8Encoding]::new($false); & ([scriptblock]::Create(([Console]::In.ReadLine() | ConvertFrom-Json)))",
         ])
         .creation_flags(0x0800_0000)
         .stdin(Stdio::piped())
@@ -112,6 +126,16 @@ fn run<T: for<'de> Deserialize<'de>>(request: Request) -> Result<T, String> {
             .stdin
             .as_mut()
             .ok_or("Missing accessibility request input")?;
+        let script = format!(
+            "{}\n{}",
+            include_str!("vscode.ps1"),
+            include_str!("accessibility.ps1")
+        );
+        let script = serde_json::to_vec(&script).map_err(|error| error.to_string())?;
+        input
+            .write_all(&script)
+            .and_then(|()| input.write_all(b"\n"))
+            .map_err(|error| format!("Cannot send accessibility helper: {error}"))?;
         input
             .write_all(&payload)
             .and_then(|()| input.write_all(b"\n"))
@@ -130,7 +154,7 @@ fn run<T: for<'de> Deserialize<'de>>(request: Request) -> Result<T, String> {
             .data
             .ok_or("Accessibility provider returned no result")?;
         // Acknowledge only after the recovery identity has reached the parent intact.
-        if needs_ack {
+        if response.commit_required {
             input
                 .write_all(b"commit\n")
                 .map_err(|error| format!("Cannot acknowledge accessibility response: {error}"))?;
@@ -184,6 +208,40 @@ pub fn inspect(window: u64, process_id: u32) -> Result<Snapshot, String> {
         process_id,
         operation: Operation::Inspect,
     })
+}
+
+pub fn begin_editor(
+    window: u64,
+    process_id: u32,
+    action: u32,
+) -> Result<Option<EditorSession>, String> {
+    #[derive(Deserialize)]
+    struct Review {
+        session: Option<EditorSession>,
+    }
+    run::<Review>(Request {
+        window,
+        process_id,
+        operation: Operation::BeginEditor { action },
+    })
+    .map(|review| review.session)
+}
+
+pub fn restore_editor(
+    window: u64,
+    process_id: u32,
+    session: EditorSession,
+    interrupted: bool,
+) -> Result<(), String> {
+    run::<bool>(Request {
+        window,
+        process_id,
+        operation: Operation::RestoreEditor {
+            session,
+            interrupted,
+        },
+    })
+    .map(|_| ())
 }
 
 pub fn browser_context(window: u64, process_id: u32) -> Result<BrowserContext, String> {

@@ -27,11 +27,12 @@ pub struct Plan {
     pub scenario: Scenario,
     pub duration_ms: u64,
     pace: f64,
+    can_scroll: bool,
     last: Action,
 }
 
 impl Plan {
-    pub fn new(rng: &mut impl Rng) -> Self {
+    pub fn new(can_scroll: bool, rng: &mut impl Rng) -> Self {
         let scenario = if rng.random_bool(0.3) {
             Scenario::Reviewing
         } else {
@@ -39,7 +40,12 @@ impl Plan {
         };
         Self {
             scenario,
-            duration_ms: rng.random_range(90_000..=240_000),
+            duration_ms: if can_scroll {
+                rng.random_range(18_000..=40_000)
+            } else {
+                rng.random_range(8_000..=18_000)
+            },
+            can_scroll,
             pace: rng.random_range(0.8..=1.3),
             last: Action::Pause,
         }
@@ -48,7 +54,13 @@ impl Plan {
     pub fn next(&mut self, rng: &mut impl Rng) -> (Action, u64) {
         self.pace = (self.pace * rng.random_range(0.94..=1.06)).clamp(0.7, 1.5);
         let roll = rng.random_range(0..100);
-        let action = if matches!(self.last, Action::Scroll(_)) && rng.random_bool(0.45) {
+        let action = if !self.can_scroll {
+            if roll < 92 {
+                Action::Move
+            } else {
+                Action::Pause
+            }
+        } else if matches!(self.last, Action::Scroll(_)) && rng.random_bool(0.45) {
             Action::Pause
         } else {
             match self.scenario {
@@ -66,11 +78,19 @@ impl Plan {
                 },
             }
         };
-        let pause = match action {
-            Action::Pause if rng.random_bool(0.12) => rng.random_range(25_000..=75_000),
-            Action::Pause => rng.random_range(5_000..=18_000),
-            Action::Scroll(_) => rng.random_range(2_000..=10_000),
-            _ => rng.random_range(700..=3_500),
+        let pause = if !self.can_scroll {
+            match action {
+                Action::Pause => rng.random_range(180..=700),
+                _ => rng.random_range(60..=280),
+            }
+        } else {
+            match action {
+                Action::Pause if rng.random_bool(0.12) => rng.random_range(25_000..=75_000),
+                Action::Pause => rng.random_range(5_000..=18_000),
+                Action::Scroll(_) => rng.random_range(2_000..=10_000),
+                Action::Move => rng.random_range(100..=600),
+                _ => rng.random_range(700..=3_500),
+            }
         };
         self.last = action;
         (action, (pause as f64 * self.pace) as u64)
@@ -104,16 +124,96 @@ pub fn pointer_path(
         .collect()
 }
 
+pub fn pointer_route(
+    bounds: crate::desktop::Bounds,
+    rows: &[crate::desktop::Bounds],
+    rng: &mut impl Rng,
+) -> Vec<(i32, i32)> {
+    use rand::seq::SliceRandom;
+    let mut cells: Vec<_> = (0..9).collect();
+    cells.shuffle(rng);
+    cells
+        .into_iter()
+        .take(rng.random_range(3..=6))
+        .map(|cell| {
+            let left = bounds.x + 24 + ((bounds.width - 48) * (cell % 3) + 2) / 3;
+            let right = bounds.x + 24 + ((bounds.width - 48) * (cell % 3 + 1) + 2) / 3;
+            let top = bounds.y + 60 + ((bounds.height - 84) * (cell / 3) + 2) / 3;
+            let bottom = bounds.y + 60 + ((bounds.height - 84) * (cell / 3 + 1) + 2) / 3;
+            let candidates: Vec<_> = rows
+                .iter()
+                .map(|row| (row.x + row.width / 2, row.y + row.height / 2))
+                .filter(|(x, y)| *x >= left && *x < right && *y >= top && *y < bottom)
+                .collect();
+            if !candidates.is_empty() && rng.random_bool(0.75) {
+                candidates[rng.random_range(0..candidates.len())]
+            } else {
+                (rng.random_range(left..right), rng.random_range(top..bottom))
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rand::{rngs::StdRng, SeedableRng};
 
     #[test]
+    fn windows_without_scroll_keep_moving_and_switch_within_eighteen_seconds() {
+        let mut rng = StdRng::seed_from_u64(91);
+        for _ in 0..30 {
+            let mut plan = Plan::new(false, &mut rng);
+            assert!((8_000..=18_000).contains(&plan.duration_ms));
+            let actions: Vec<_> = (0..100).map(|_| plan.next(&mut rng)).collect();
+            assert!(actions.iter().all(|(action, pause)| matches!(
+                action,
+                Action::Move | Action::Pause
+            ) && *pause <= 1_050));
+            assert!(
+                actions
+                    .iter()
+                    .filter(|(action, _)| *action == Action::Move)
+                    .count()
+                    > 80
+            );
+        }
+    }
+
+    #[test]
+    fn pointer_visits_multiple_distinct_regions_inside_the_window() {
+        let mut rng = StdRng::seed_from_u64(61);
+        let bounds = crate::desktop::Bounds {
+            x: -800,
+            y: 20,
+            width: 790,
+            height: 600,
+        };
+        for _ in 0..100 {
+            let route = pointer_route(bounds, &[], &mut rng);
+            assert!((3..=6).contains(&route.len()));
+            assert!(route.iter().all(|(x, y)| *x >= bounds.x + 24
+                && *x < bounds.x + bounds.width - 24
+                && *y >= bounds.y + 60
+                && *y < bounds.y + bounds.height - 24));
+            let regions: std::collections::HashSet<_> = route
+                .iter()
+                .map(|(x, y)| {
+                    (
+                        (x - bounds.x - 24) * 3 / (bounds.width - 48),
+                        (y - bounds.y - 60) * 3 / (bounds.height - 84),
+                    )
+                })
+                .collect();
+            assert_eq!(regions.len(), route.len());
+        }
+    }
+
+    #[test]
     fn plans_only_issue_reading_actions_with_positive_pauses() {
         let mut rng = StdRng::seed_from_u64(8);
         for _ in 0..60 {
-            let mut plan = Plan::new(&mut rng);
+            let mut plan = Plan::new(true, &mut rng);
             for _ in 0..200 {
                 let (action, pause) = plan.next(&mut rng);
                 assert!(pause > 0);
@@ -128,7 +228,7 @@ mod tests {
     #[test]
     fn external_reading_never_issues_navigation_or_editing_keys() {
         let mut rng = StdRng::seed_from_u64(12);
-        let mut plan = Plan::new(&mut rng);
+        let mut plan = Plan::new(true, &mut rng);
         for _ in 0..1000 {
             let (action, _) = plan.next(&mut rng);
             assert!(matches!(
@@ -141,7 +241,7 @@ mod tests {
     #[test]
     fn scrolling_and_pauses_vary_without_mandatory_return_to_top() {
         let mut rng = StdRng::seed_from_u64(19);
-        let mut plan = Plan::new(&mut rng);
+        let mut plan = Plan::new(true, &mut rng);
         let actions: Vec<_> = (0..1000).map(|_| plan.next(&mut rng)).collect();
         assert!(actions
             .iter()
