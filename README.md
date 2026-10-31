@@ -1,81 +1,207 @@
+<div align="center">
+
+<img src="src-tauri/icons/128x128@2x.png" width="104" height="104" alt="Emploidle: a desktop window with a mouse pointer">
+
 # Emploidle
 
-Cross-platform anti-idle activity simulator. Choose allowed windows and press Start to run reading and reviewing scenarios. Local text previews and a temporary practice document support more varied activity without editing external documents or opening messages.
+A desktop anti-idle activity simulator with automatic window discovery, varied cursor movement and application-aware activity.
 
-## What it does when running
+[![Release](https://img.shields.io/github/v/release/khasky/emploidle?color=2d6cdf)](https://github.com/khasky/emploidle/releases/latest) [![Build](https://github.com/khasky/emploidle/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/khasky/emploidle/actions/workflows/build.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-2d6cdf)](LICENSE) ![Platforms: Windows, macOS, Linux X11](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20X11-2d6cdf)
 
-- **Scenarios** stay with a window for 90–240 seconds, with reading pauses, occasional longer breaks and a gradually changing pace. Window memory returns to previously selected sources.
-- **Cursor movement** follows curved paths with acceleration, deceleration and small corrections. Where accessibility exposes text rows, hovering targets those rows.
-- **External reading** never sends navigation or editing keys. It only hovers over the already foreground window. External scrolling cannot guarantee restoration when the user scrolls or the document changes concurrently, so scrolling is confined to local previews and the practice document.
-- **Local preview** captures up to 3,000 characters exposed by an allowed source and displays them in a read-only Emploidle window. When the browser exposes its address bar, the domain identifies Notion, Jira, GitHub/GitLab, Gmail, Google Calendar and Slack/Discord views. This classification does not navigate the original service or enumerate its documents, tickets, repositories, messages or channels.
-- **Practice document** supports clicks, caret movement and selection through native input. Its own page animates typing, occasional corrected typos and gradual deletion, restoring the original text, selection and scroll position. It can use a short passage captured from a selected source. Clipboard contents are not changed. Text remains local and is discarded when the document closes.
-- **User control** interrupts actions when you use the keyboard or mouse and resumes after 8 seconds without physical input. Ctrl + Alt + Escape stops activity globally (Control + Option + Escape on macOS).
+[Download](https://github.com/khasky/emploidle/releases/latest) · [Features](#features) · [Quick start](#quick-start) · [Schedule](#schedule-and-startup) · [Platforms](#platform-notes) · [Development](#development)
 
-Choose windows under Activity windows, assign Reading or Local preview, optionally enable Practice document, then press Start. Start hides the main window to the tray. Opening it while activity is running shows Paused; closing or minimizing it to the tray resumes activity. Stop remains available while paused.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/dark-main.png">
+  <source media="(prefers-color-scheme: light)" srcset="screenshots/light-main.png">
+  <img src="screenshots/light-main.png" width="360" alt="Emploidle main screen with automatic activity and daily schedule controls">
+</picture>
 
-Refresh the list after opening or closing an application. Settings remember the selected application and exact window title; native window IDs are resolved again after launch. If the source is unavailable or a window loses focus unexpectedly, activity stops.
+<p><sub>Application interface with demonstration data. Screenshots follow your light or dark theme.</sub></p>
 
-External tabs, comments, drafts, messages and IDE workspace navigation are not opened or edited. Erasing temporary input cannot undo server autosave or read markers, so typing and selection are confined to local documents. Only currently accessible content can be previewed; this is not a browser extension or a service API integration.
+<sub>Built with <b>Tauri 2</b> · <b>Rust</b> · <b>HTML, CSS &amp; JavaScript</b></sub>
 
-Exit from the tray menu → Quit. The tray menu also has Start / Stop / Show window.
+</div>
+
+## Features
+
+- **Varied activity.** Reading and reviewing scenarios last 90–240 seconds, with curved cursor paths, small corrections, reading pauses and occasional longer breaks.
+- **Automatic window discovery.** Open applications become available automatically, without window lists, permissions to configure or practice documents.
+- **Application-aware actions on Windows.** Hover over accessible content, scroll supported document controls and restore their position, temporarily review supported browser pages in an owned tab, or expand and collapse an IDE folder.
+- **Pauses for your input.** Physical keyboard or mouse activity interrupts the simulation. It resumes after 8 seconds without physical input; a global shortcut stops it immediately.
+- **Daily schedule.** Set start and finish times, including overnight shifts, and optionally launch Emploidle at login.
+- **Tray controls and updates.** Start, stop or reopen the window from the tray. Builds with updater support offer signed updates with download progress and a restart button.
+
+<details>
+<summary><b>More screenshots: schedule, paused activity and updates</b></summary>
+
+**Daily schedule**
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/dark-schedule.png">
+  <source media="(prefers-color-scheme: light)" srcset="screenshots/light-schedule.png">
+  <img src="screenshots/light-schedule.png" width="400" alt="Daily schedule from 09:00 to 18:00, with launch at login turned off">
+</picture>
+
+**Paused activity**
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/dark-paused.png">
+  <source media="(prefers-color-scheme: light)" srcset="screenshots/light-paused.png">
+  <img src="screenshots/light-paused.png" width="360" alt="Activity paused while the main window is open, with Stop available">
+</picture>
+
+**Application update**
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/dark-update.png">
+  <source media="(prefers-color-scheme: light)" srcset="screenshots/light-update.png">
+  <img src="screenshots/light-update.png" width="360" alt="An available application update with Update and restart and Later controls">
+</picture>
+
+</details>
+
+## Installation
+
+Download an installer from [GitHub Releases](https://github.com/khasky/emploidle/releases/latest).
+
+| Platform | Package | Installation |
+| --- | --- | --- |
+| Windows x64 | `-win-x64-setup.exe` or `-win-x64.msi` | Run the installer. |
+| macOS Apple Silicon | `-mac-arm64.dmg` | Open the disk image and drag Emploidle to Applications. |
+| macOS Intel | `-mac-x64.dmg` | Open the disk image and drag Emploidle to Applications. |
+| Linux x64, X11 | `-linux-x64.AppImage`, `.deb` or `.rpm` | Make the AppImage executable and launch it, or install the package for your distribution. |
+
+Filenames begin with `Emploidle-<version>`. See [Platform notes](#platform-notes) for permissions and session requirements.
+
+### Updates
+
+On startup, builds with updater support check GitHub Releases for a newer version. Choose **Update and restart** to download, verify and install it, or **Later** to keep working. A failed download or installation shows an error and a **Retry** button; offline checks leave the application usable.
+
+Install a build containing the updater manually once. Earlier builds cannot update themselves. Signing and publishing instructions are in the [release guide](docs/releasing.md).
+
+## Quick start
+
+1. Open the applications you want to use, then launch Emploidle.
+2. Press **Start**. The main window hides to the tray and activity begins; new windows are discovered automatically.
+3. Use **Stop** in the window or tray menu to finish, or press **Ctrl + Alt + Escape** globally. On macOS, use **Control + Option + Escape**.
+
+### Automatic activity
+
+| Application or capability | Available actions |
+| --- | --- |
+| Open foreground windows | Curved cursor movement and hovering; accessible content rows are preferred. |
+| Recognized document apps, supported sites and IDEs on Windows | Focus the window and scroll native accessibility controls, restoring the original scroll position after reading. |
+| Notion, Jira, GitHub/GitLab and Google Calendar in supported Chromium browsers | Review the current address in a temporary tab; visited same-site document, ticket and code links are eligible where their URL matches a supported viewing route. Close only the tab created by Emploidle and return to the original tab. |
+| IDEs exposing native expandable trees on Windows | Temporarily expand a collapsed folder and collapse it again. |
+| Mail, chat and unrecognized applications | Hover only in an already active window. No automatic activation, message opening or scrolling that could mark messages as read. |
+
+Actions depend on the controls exposed by each application. Unsupported actions are skipped. If a view changes concurrently, its newer position is preserved; a failed restoration stops further activity. Opening a temporary page can still affect the site's viewing history or activity log.
+
+Comment entry, mail drafts, unread-channel navigation, extension panels and arbitrary project-file opening are currently unsupported. Emploidle does not type into external documents or forms, or substitute local practice documents for these operations.
+
+### Window and tray controls
+
+| Action | Result |
+| --- | --- |
+| Open the main window while running | Activity pauses; **Stop** remains available. |
+| Close or minimize the main window to the tray | Running activity resumes. |
+| Tray → **Show window**, **Start** or **Stop** | Control activity without leaving Emploidle open on the desktop. |
+| Tray → **Quit** | Exit the application. |
+
+Open windows are rediscovered between scenarios. Closed or unavailable windows are skipped; recently used windows are revisited with varied timing. Physical input interrupts the current scenario.
 
 ## Schedule and startup
 
-Schedule uses the system's local time. The default 00:00–00:00 disables scheduling; other start and finish times define a daily shift, including shifts across midnight. Emploidle must remain open in the tray for its schedule to run. A manual Stop suppresses the rest of the current shift; the next shift can start automatically. Manual Start outside a shift runs until Stop or the next scheduled finish.
+Set **Start** and **Finish** under **Schedule**, then press **Apply**. The schedule follows the system's local time, and Emploidle must remain open in the tray for it to run.
 
-Start with system is off by default. When enabled, Emploidle launches in the background at user login through HKCU Run on Windows, a LaunchAgent on macOS or XDG autostart on Linux. Windows registration uses the original installed executable, not its temporary renamed process copy. Settings and source bindings are stored in the application's config directory; captured document text is not saved there.
+| Setting or action | Behavior |
+| --- | --- |
+| `00:00`–`00:00` | Scheduling is disabled by default. |
+| Different start and finish times | A daily shift, including shifts that cross midnight. |
+| Manual **Stop** during a shift | Suppresses the remainder of that shift; the next shift can start automatically. |
+| Manual **Start** outside a shift | Runs until **Stop** or the next scheduled finish. |
+| **Start with system** | Launches in the background at user login; off by default. |
 
-## Build & run
+Schedule and startup preferences are stored in the application's config directory. Older saved window selections are ignored.
 
-Requires the [Rust toolchain](https://rustup.rs), Node.js 22 or newer, and pnpm 9.15.4 (pinned in `package.json`). Install the project's tooling, including the Tauri CLI and commit hook:
+## Platform notes
+
+| Platform | Requirements and limits |
+| --- | --- |
+| **Windows** | Native controls use the built-in Windows PowerShell UI Automation provider. Restorable scrolling, Chromium tab controls and IDE trees require compatible accessibility providers. Protected windows can reject access or focus changes. |
+| **macOS** | Enable **Accessibility** and **Input Monitoring** under System Settings → Privacy & Security. Window discovery requires Accessibility; **Start** requests Input Monitoring when needed. Secure Input can restrict monitoring in protected applications. |
+| **Linux** | Requires an **X11** session with XInput 2 and XTEST devices. Wayland is unsupported because global window control and physical input monitoring cannot be guaranteed through XWayland. |
+
+Restorable scrolling, browser tabs and IDE tree actions currently require Windows. macOS and Linux support automatic discovery and cursor activity.
+
+## Development
+
+Requires the [Rust toolchain](https://rustup.rs), Node.js 22 or newer, and pnpm 9.15.4, pinned in [package.json](package.json). Install the [Tauri platform prerequisites](https://tauri.app/start/prerequisites/), including WebKitGTK on Linux.
 
 ```sh
 pnpm install
-```
-
-Platform prerequisites (Linux only): WebKitGTK and friends — see the [Tauri Linux setup](https://tauri.app/start/prerequisites/).
-
-From the project root:
-
-```sh
 pnpm dev:desktop      # run
 pnpm build:desktop    # produce a bundled binary/installer
 ```
 
-The frontend is static files under `src/`. Node.js runs the development and release tooling.
+The frontend is static files under `src/`. Node.js runs development and release tooling. Local builds do not require the updater signing key.
 
-## Versioning and releases
+### README screenshots
 
-The first release is **1.0.0**. `pnpm release` derives versions and [CHANGELOG.md](CHANGELOG.md) from Conventional Commits, synchronizing `package.json`, Tauri's config and both Cargo files using [.versionrc.json](.versionrc.json).
+Regenerate the light and dark screenshots with Playwright:
 
-Run `pnpm check:versions` to check version parity, or `pnpm release --dry-run` to preview a release after committing the initial application. A pushed `v<version>` tag builds installers for Windows, Linux and macOS and prepares a draft GitHub Release. See [the release guide](docs/releasing.md) for the first-release command and publishing.
+```sh
+pnpm exec playwright install chromium
+pnpm screenshots
+```
 
-Commit messages and pull request titles follow [Conventional Commits](CONTRIBUTING.md#commit-messages), using the style from Git Account Manager.
+The capture script renders the same HTML, CSS and JavaScript as the desktop app at 2× resolution. A separate [Tauri mock](scripts/screenshots/tauri-mock.mjs) supplies demonstration data; capture does not read your open windows, change startup settings or run activity. Images are written to `screenshots/`. Main-window dimensions come from Tauri's config; schedule captures frame its controls, and paused/update captures show the corresponding main-window states.
 
-## Platform notes
+### Checks
 
-Text snapshots currently require Windows. macOS and Linux support hovering and the practice document.
+```sh
+pnpm check:versions
+pnpm lint
+pnpm lint:workflow
+pnpm test
+cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo test --locked --manifest-path src-tauri/Cargo.toml
+```
 
-- **macOS** — enable **Accessibility** and **Input Monitoring** for the application under System Settings → Privacy & Security. Window selection requires Accessibility; Start requests Input Monitoring when needed. Secure Input can restrict monitoring in protected applications.
-- **Linux** — requires an X11 session with XInput 2 and XTEST devices. Wayland is unsupported because global window control and physical input monitoring cannot be guaranteed through XWayland.
-- **Windows** — source capture uses the built-in Windows PowerShell UI Automation provider. Some applications do not expose suitable text. Windows can refuse to focus an application or protected applications can reject simulated input; the app reports this and stops.
+### Versioning and releases
 
-## Icons
+Commit messages and pull request titles follow [Conventional Commits](CONTRIBUTING.md#commit-messages). `pnpm release` derives the next version and [CHANGELOG.md](CHANGELOG.md) from commits, synchronizing `package.json`, Tauri's config and both Cargo files through [.versionrc.json](.versionrc.json).
 
-The application and tray icon comes from [`app-icon.svg`](app-icon.svg), a 1024×1024 vector source. Generate icons with `pnpm tauri icon app-icon.svg --output src-tauri/target/app-icons`, then copy `32x32.png`, `128x128.png`, `128x128@2x.png`, `icon.png`, `icon.ico`, and `icon.icns` into `src-tauri/icons/`.
+Run `pnpm check:versions` to check version parity, or `pnpm release --dry-run` to preview a release. A pushed `v<version>` tag builds installers for Windows, Linux and macOS and prepares a draft GitHub Release. Follow the [release guide](docs/releasing.md) for signing, updater artifacts and publishing.
 
-## Updates
+## Implementation details
 
-Emploidle checks GitHub Releases on startup. When a newer signed version is available, choose **Update and restart** to download, verify and install it, or **Later** to keep working. Download and installation failures remain visible with a retry button. Offline checks leave the application usable.
+<details>
+<summary><b>Native activity and restoration</b></summary>
 
-Install a build containing the updater manually once; older builds cannot update themselves. Signing and release setup is documented in [Releasing Emploidle](docs/releasing.md).
+Windows accessibility inspection identifies visible controls, browser domains, scroll percentages and native element identities. Scrolling records the exact control and its before/after positions; restoration proceeds only while the view still matches the action's result. Tab cleanup addresses the created tab by its native runtime identity and preserves a user-selected different tab.
 
-## Process name
+Browser routes are limited to HTTPS pages on the same origin. Link transitions require a visited link and a recognized document, ticket or code path. Mail and chat are excluded from activation and navigation to preserve message read states. No extension or service credentials are required.
 
-Each launch generates a random 15-character process name, also used for the window title and tray tooltip. The text inside the window keeps the `Emploidle` name.
+</details>
 
-- **Windows** — the launcher briefly runs as `emploidle.exe`, starts a copy with a random `.exe` filename under the temporary directory's `emploidle-processes` folder, then exits. The temporary copy omits the version resource so Task Manager uses its random filename; the original executable retains its metadata. Arguments and the working directory are preserved. Unlocked copies from earlier runs are removed on the next launch. The final copy remains until a later launch or temporary-file cleanup. Both debug and release builds run without a console window. The interface uses WebView2, whose browser, renderer and utility processes appear under the application in Task Manager.
-- **Linux** — changes the kernel process name through `/proc/self/comm`, visible in tools such as `ps -o comm`. The executable path and command line retain their original names.
-- **macOS** — changes the kernel process name through `kern.procname`, preserving the application bundle and its signature. Views based on bundle metadata or command-line arguments may still show `Emploidle`.
+<details>
+<summary><b>Process names and startup registration</b></summary>
 
-If setting the random name fails, the application exits before starting its activity worker or window.
+Each launch generates a random 15-character process name, also used for the window title and tray tooltip. The text inside the window keeps the Emploidle name. If setting the random name fails, the application exits before starting its activity worker or window.
+
+- **Windows:** the launcher briefly runs as `emploidle.exe`, starts a copy with a random `.exe` filename in the temporary directory's `emploidle-processes` folder, then exits. The copy omits the version resource so Task Manager uses its random filename; the original executable retains its metadata. Arguments and the working directory are preserved. Unlocked copies from earlier runs are removed on the next launch; the final copy remains until a later launch or temporary-file cleanup. Both debug and release builds run without a console window. WebView2 browser, renderer and utility processes appear under the application in Task Manager.
+- **Linux:** changes the kernel process name through `/proc/self/comm`, visible in tools such as `ps -o comm`. The executable path and command line retain their original names.
+- **macOS:** changes the kernel process name through `kern.procname`, preserving the application bundle and its signature. Views based on bundle metadata or command-line arguments may still show Emploidle.
+
+Launch at login uses HKCU Run on Windows, a LaunchAgent on macOS or XDG autostart on Linux. Windows registration uses the original installed executable instead of its temporary renamed process copy.
+
+</details>
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions and verification commands. Report bugs and request features through [GitHub Issues](https://github.com/khasky/emploidle/issues).
+
+## License
+
+[MIT](LICENSE) · Copyright © 2026 Khasky
