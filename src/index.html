@@ -9,6 +9,13 @@
   <body>
     <main class="app">
       <h1 class="brand">Emploidle</h1>
+      <section id="update-banner" class="update-banner" aria-label="Application update" hidden>
+        <p id="update-message" role="status" aria-live="polite"></p>
+        <div class="update-actions">
+          <button id="update-install" class="secondary" type="button">Update and restart</button>
+          <button id="update-later" class="secondary" type="button">Later</button>
+        </div>
+      </section>
       <p class="status" id="status" role="status">Loading…</p>
       <button id="toggle" class="toggle" data-active="false" disabled>Start</button>
       <fieldset id="configuration" disabled>
@@ -44,5 +51,6 @@
       <p class="hint" id="version" aria-label="Application version"></p>
     </main>
     <script src="main.js"></script>
+    <script src="update.js"></script>
   </body>
 </html>

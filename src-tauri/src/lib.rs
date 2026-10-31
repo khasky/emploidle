@@ -6,6 +6,7 @@ mod preferences;
 mod process_name;
 mod schedule;
 mod source_context;
+mod updater;
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -254,6 +255,8 @@ pub fn run() {
     controller.main_visible.store(!background, Ordering::SeqCst);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::UpdateState::default())
         .manage(AppState { controller })
         .invoke_handler(tauri::generate_handler![
             set_active,
@@ -269,7 +272,9 @@ pub fn run() {
             practice_done,
             practice_can_type,
             get_preferences,
-            update_preferences
+            update_preferences,
+            updater::check_update,
+            updater::install_update
         ])
         .setup(move |app| {
             let path = app.path().app_config_dir()?.join("settings.json");

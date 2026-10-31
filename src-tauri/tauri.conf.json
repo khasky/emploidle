@@ -39,6 +39,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": false,
     "publisher": "Khasky",
     "copyright": "Copyright (c) 2026 Khasky",
     "targets": "all",
@@ -49,5 +50,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/khasky/emploidle/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYwOUM5NDM3QTdCMTczRTEKUldUaGM3R25ONVNjOE9MNmZVbHA2SGlnYnBYaWVCRktLM2MyVkNYZXNqcno4YkRxdmozZ0lzbU0K"
+    }
   }
 }

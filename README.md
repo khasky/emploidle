@@ -64,6 +64,12 @@ Text snapshots currently require Windows. macOS and Linux support hovering and t
 
 The application and tray icon comes from [`app-icon.svg`](app-icon.svg), a 1024×1024 vector source. Generate icons with `pnpm tauri icon app-icon.svg --output src-tauri/target/app-icons`, then copy `32x32.png`, `128x128.png`, `128x128@2x.png`, `icon.png`, `icon.ico`, and `icon.icns` into `src-tauri/icons/`.
 
+## Updates
+
+Emploidle checks GitHub Releases on startup. When a newer signed version is available, choose **Update and restart** to download, verify and install it, or **Later** to keep working. Download and installation failures remain visible with a retry button. Offline checks leave the application usable.
+
+Install a build containing the updater manually once; older builds cannot update themselves. Signing and release setup is documented in [Releasing Emploidle](docs/releasing.md).
+
 ## Process name
 
 Each launch generates a random 15-character process name, also used for the window title and tray tooltip. The text inside the window keeps the `Emploidle` name.

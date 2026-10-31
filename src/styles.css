@@ -264,6 +264,26 @@ legend {
   min-height: 1.2em;
 }
 
+.update-banner {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--card);
+  overflow-wrap: anywhere;
+}
+
+.update-banner p {
+  margin: 0 0 8px;
+}
+
+.update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
 .toggle {
   appearance: none;
   border: none;

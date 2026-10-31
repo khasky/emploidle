@@ -72,11 +72,26 @@ pnpm release --release-as 1.1.0
 
 A pushed `v*` tag builds Windows x64, Linux x64, macOS Apple Silicon and macOS Intel installers. Build jobs use `pnpm tauri`. After every platform succeeds, `finalize-release` runs JavaScript scripts to rename the assets and extract the exact version's notes from `CHANGELOG.md`.
 
-Assets use `Emploidle-<version>-<win|mac|linux>-<x64|arm64>[-setup].<ext>`. macOS application archives use `.app.tar.gz`. There is no updater manifest because this application has no automatic updater.
+Assets use `Emploidle-<version>-<win|mac|linux>-<x64|arm64>[-setup].<ext>`. macOS application archives use `.app.tar.gz`. Detached signatures use the payload name followed by `.sig`. After all builds succeed, finalization creates `latest.json` from the uploaded payloads and signatures, with their final download URLs and changelog notes. It requires Windows NSIS, Linux AppImage and both macOS architectures; signed MSI, DEB and RPM packages get installer-specific entries too. Missing required payloads or signatures fail finalization. Finalization only edits drafts.
 
 Use **Actions → Build & Release → Run workflow** on `main` to rehearse platform builds. A manual run stores installers as workflow artifacts and creates no release. After a tag build and finalization succeed, review the draft under **Releases** and choose **Publish release**.
 
-The workflow uses the automatic `GITHUB_TOKEN`; no signing secrets are required. Windows installers have no publisher certificate, and macOS builds are not notarized. A failed platform build leaves an incomplete draft; publish it only after all required jobs succeed. Correct an already published release with a new patch version instead of moving its tag.
+The workflow uses the automatic `GITHUB_TOKEN` and the repository's updater signing secrets described below. Windows installers have no publisher certificate, and macOS builds are not notarized. A failed platform build leaves an incomplete draft; publish it only after all required jobs succeed. Correct an already published release with a new patch version instead of moving its tag.
+
+## Updater signing
+
+The official Tauri updater checks `https://github.com/khasky/emploidle/releases/latest/download/latest.json` at startup. It installs a newer version only after the user chooses **Update and restart**, verifies the downloaded payload, stops activity, installs, and restarts. On Windows the installer performs the restart; on macOS and Linux the application restarts itself. The original executable or AppImage path is used instead of a temporary process image.
+
+The public key is stored in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`. The matching private key is stored in the GitHub Actions secret `TAURI_SIGNING_PRIVATE_KEY`. Set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` too if the private key has a passphrase. Keep a secure backup of the private key outside the repository: losing it prevents installed copies from trusting later updates. Replacing the public key requires an update signed with the existing key first.
+
+Local builds use `createUpdaterArtifacts: false` and need no signing key. CI merges `src-tauri/tauri.updater.conf.json` to enable signed updater artifacts, and fails if the signing secret is missing. To build signed installers locally in PowerShell, use the path to the existing key:
+
+```powershell
+$env:TAURI_SIGNING_PRIVATE_KEY = Join-Path $HOME '.tauri/emploidle-updater.key'
+pnpm build:desktop --ci --config src-tauri/tauri.updater.conf.json -- -- --locked
+```
+
+The public releases before updater support require a manual installation of a newer build once. Publishing a draft makes its `latest.json` available to installed copies; retain updater payloads and their signatures when editing release assets.
 
 Release-note extraction can also be run locally:
 
