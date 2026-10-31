@@ -62,7 +62,7 @@ Text snapshots currently require Windows. macOS and Linux support hovering and t
 
 ## Icons
 
-`src-tauri/icons/` holds placeholder icons. To replace them, add an `app-icon.svg` (1024×1024) and run `pnpm tauri icon app-icon.svg`.
+The application and tray icon comes from [`app-icon.svg`](app-icon.svg), a 1024×1024 vector source. Generate icons with `pnpm tauri icon app-icon.svg --output src-tauri/target/app-icons`, then copy `32x32.png`, `128x128.png`, `128x128@2x.png`, `icon.png`, `icon.ico`, and `icon.icns` into `src-tauri/icons/`.
 
 ## Process name
 
