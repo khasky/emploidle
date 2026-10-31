@@ -34,7 +34,7 @@ impl Icons {
 
 fn tint(source: &Image<'_>, color: [u8; 3]) -> Image<'static> {
     let mut pixels = source.rgba().to_vec();
-    for pixel in pixels.chunks_exact_mut(4) {
+    for pixel in pixels.as_chunks_mut::<4>().0 {
         if pixel[2] > pixel[0] && pixel[2] > pixel[1] {
             let intensity = f64::from(pixel[2]) / 255.0;
             for channel in 0..3 {
@@ -93,8 +93,10 @@ mod tests {
             for (original, recolored) in icons
                 .idle
                 .rgba()
-                .chunks_exact(4)
-                .zip(icon.rgba().chunks_exact(4))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(icon.rgba().as_chunks::<4>().0.iter())
             {
                 assert_eq!(original[3], recolored[3]);
                 if original[..3] == [255, 255, 255] {
@@ -105,12 +107,16 @@ mod tests {
         assert!(icons
             .active
             .rgba()
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|p| u16::from(p[1]) > 2 * u16::from(p[0]) && p[1] > p[2]));
         assert!(icons
             .paused
             .rgba()
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|p| p[0] > p[1] && p[1] > p[2]));
     }
 }
