@@ -2,6 +2,18 @@
 
 All notable changes are documented here. The format follows [Conventional Commits](https://www.conventionalcommits.org/) and the version scheme is [Semantic Versioning](https://semver.org/).
 
+## [1.0.3](https://github.com/khasky/emploidle/compare/v1.0.2...v1.0.3) (2026-10-31)
+
+
+### Features
+
+* **activity:** add tray states and varied editor activity ([4fca777](https://github.com/khasky/emploidle/commit/4fca77724513b968ebaf6ef8298c28b63b2823d3))
+
+
+### Bug Fixes
+
+* **tray:** use fixed-size pixel chunks ([a435370](https://github.com/khasky/emploidle/commit/a435370a7f7826f1d763ab9a1ca3b9f9ac77f791))
+
 ## [1.0.2](https://github.com/khasky/emploidle/compare/v1.0.1...v1.0.2) (2026-10-31)
 
 
