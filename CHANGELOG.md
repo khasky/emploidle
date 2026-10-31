@@ -2,6 +2,20 @@
 
 All notable changes are documented here. The format follows [Conventional Commits](https://www.conventionalcommits.org/) and the version scheme is [Semantic Versioning](https://semver.org/).
 
+## [1.0.2](https://github.com/khasky/emploidle/compare/v1.0.1...v1.0.2) (2026-10-31)
+
+
+### Features
+
+* automate desktop activity and simplify the interface ([18ffe4f](https://github.com/khasky/emploidle/commit/18ffe4f4167e4bfc980c133b081b9b78df17d988))
+* **tauri:** add signed application updates ([6e57b7f](https://github.com/khasky/emploidle/commit/6e57b7facf185910c14efc9b7a2c237f95de17f8))
+* **ui:** add the Emploidle application icon ([68bc94f](https://github.com/khasky/emploidle/commit/68bc94f609c58956121bc7c12d9a5ff08b27d8b0))
+
+
+### Bug Fixes
+
+* **ui:** fill square application and tray icons ([0ed18e3](https://github.com/khasky/emploidle/commit/0ed18e3659ac8c4c7520044db678c35caf94cad8))
+
 ## [1.0.1](https://github.com/khasky/emploidle/compare/v1.0.0...v1.0.1) (2026-10-31)
 
 
