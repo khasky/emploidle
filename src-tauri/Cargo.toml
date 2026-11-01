@@ -1,6 +1,6 @@
 [package]
 name = "emploidle"
-version = "1.0.3"
+version = "1.0.4"
 description = "Anti-idle activity simulator with a tray icon"
 authors = ["https://github.com/khasky"]
 license = "MIT"

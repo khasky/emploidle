@@ -2,6 +2,22 @@
 
 All notable changes are documented here. The format follows [Conventional Commits](https://www.conventionalcommits.org/) and the version scheme is [Semantic Versioning](https://semver.org/).
 
+## [1.0.4](https://github.com/khasky/emploidle/compare/v1.0.3...v1.0.4) (2026-11-01)
+
+
+### Features
+
+* **activity:** add weekday scheduling ([d1d45d5](https://github.com/khasky/emploidle/commit/d1d45d5c7f35d0178a732c1373367f27970e08ae))
+
+
+### Bug Fixes
+
+* **activity:** rotate complete app and tab scenarios ([7d2551b](https://github.com/khasky/emploidle/commit/7d2551b181401f09db24bc62a1d3b5f55e91aa70))
+
+### Known limitations
+
+* During an in-page address change, a browser scroll command already sent through Windows UI Automation may finish after the transition. Preserving the new page's scroll position and read state is not guaranteed for this case.
+
 ## [1.0.3](https://github.com/khasky/emploidle/compare/v1.0.2...v1.0.3) (2026-10-31)
 
 
