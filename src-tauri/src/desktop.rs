@@ -58,6 +58,61 @@ pub struct BrowserContext {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BrowserTab {
+    pub id: Vec<i32>,
+    pub document: Vec<i32>,
+    pub address: String,
+    pub selected: bool,
+}
+
+pub fn browser_tabs(window: u64, process_id: u32) -> Result<Vec<BrowserTab>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        accessibility::browser_tabs(window, process_id)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, process_id);
+        Err("Native browser tabs are unavailable on this platform".into())
+    }
+}
+
+pub fn select_browser_tab(
+    window: u64,
+    process_id: u32,
+    tab: BrowserTab,
+    foreground: u64,
+) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        accessibility::select_tab(window, process_id, tab, foreground)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, process_id, tab, foreground);
+        Err("Native browser tabs are unavailable on this platform".into())
+    }
+}
+
+pub fn read_browser_page(
+    window: u64,
+    process_id: u32,
+    address: String,
+    select_text: bool,
+    cancelled: impl Fn() -> bool,
+) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        accessibility::read_page(window, process_id, address, select_text, cancelled)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, process_id, address, select_text, cancelled);
+        Err("Native browser reading is unavailable on this platform".into())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BrowserSession {
     pub created: Vec<i32>,
     pub original: Vec<i32>,
@@ -71,6 +126,47 @@ pub struct EditorSession {
     original_editor: Option<Vec<i32>>,
     created_editor: Option<Vec<i32>>,
     tree_selection: Vec<Vec<i32>>,
+    original_editors: Vec<Vec<i32>>,
+    pub file: Option<EditorFile>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EditorFile {
+    element: Vec<i32>,
+    name: String,
+    pub bounds: Bounds,
+}
+
+pub fn editor_file_target(
+    window: u64,
+    process_id: u32,
+    session: EditorSession,
+) -> Result<Bounds, String> {
+    #[cfg(target_os = "windows")]
+    {
+        accessibility::editor_file_target(window, process_id, session)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, process_id, session);
+        Err("Native editor files are unavailable".into())
+    }
+}
+
+pub fn capture_editor_review(
+    window: u64,
+    process_id: u32,
+    session: EditorSession,
+) -> Result<EditorSession, String> {
+    #[cfg(target_os = "windows")]
+    {
+        accessibility::capture_editor(window, process_id, session)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, process_id, session);
+        Err("Native editor files are unavailable".into())
+    }
 }
 
 pub fn begin_editor_review(

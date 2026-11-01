@@ -24,9 +24,9 @@ A desktop anti-idle activity simulator with automatic window discovery, varied c
 
 ## Features
 
-- **Varied activity.** Cursor routes visit 3–6 different areas in sequence. Scenarios without restorable scrolling use brief pauses and 8–18 second window budgets; reading scenarios use 18–40 second budgets with longer reading pauses. Recently used windows are revisited.
+- **Varied activity.** Windows and existing browser tabs rotate without immediate repeats when alternatives are available. Browser reading and VS Code reviews run as complete scenarios; other windows use cursor routes through several different areas.
 - **Automatic window discovery.** Open applications become available automatically, without window lists, permissions to configure or practice documents.
-- **Application-aware actions on Windows.** Hover over accessible content, scroll supported document controls and restore their position, temporarily review supported browser pages in an owned tab, or review VS Code sidebars, project files and folders.
+- **Application-aware actions on Windows.** Read existing browser tabs with smooth scrolling and a faster return, briefly select and clear visible text, or review VS Code Extensions, Explorer, folders and project files while restoring the editor's state.
 - **Pauses for your input.** Physical keyboard or mouse activity interrupts the simulation. It resumes after 8 seconds without physical input; a global shortcut stops it immediately.
 - **Weekly schedule.** Choose days of the week and start and finish times, including overnight shifts, and optionally launch Emploidle at login.
 - **Tray controls and updates.** Start, stop or reopen the window from the tray. Builds with updater support offer signed updates with download progress and a restart button.
@@ -91,9 +91,10 @@ Install a build containing the updater manually once. Earlier builds cannot upda
 | --- | --- |
 | Open foreground windows | Curved cursor movement and hovering; accessible content rows are preferred. |
 | Recognized document apps, supported sites and IDEs on Windows | Focus the window and scroll native accessibility controls, restoring the original scroll position after reading. |
-| Notion, Jira, GitHub/GitLab and Google Calendar in supported Chromium browsers | Review the current address in a temporary tab; visited same-site document, ticket and code links are eligible where their URL matches a supported viewing route. Close only the tab created by Emploidle and return to the original tab. |
-| VS Code and compatible editors exposing supported Windows accessibility controls | Review Explorer or Extensions and restore the sidebar; temporarily open a visible text file and close only its created tab; expand and collapse project folders. File opening is skipped with preview tabs, ambiguous layouts or multiple editor groups. |
-| Mail, chat and unrecognized applications | Hover only in an already active window. No automatic activation, message opening or scrolling that could mark messages as read. |
+| Existing tabs in supported Chromium browsers | Choose another available tab, save its scroll position, scroll smoothly toward the bottom and return faster, or briefly select and clear visible text. Long and infinite pages use a bounded reading interval before returning. Ambiguous tab identities are skipped. |
+| VS Code and compatible editors exposing supported Windows accessibility controls | Review Extensions, Explorer and project folders, then open a visible text file in a pinned tab and close only that created tab. Existing preview tabs are preserved. Ambiguous layouts and multiple editor groups are skipped. The editor must already be running. |
+| Supported mail inbox and sent-message lists | Scroll the list and return without opening messages or selecting text. Conversation views and chat pages that can mark messages read merely by activation are skipped. |
+| Other communication views and unrecognized applications | Hover in an already active window; no message opening or typing. |
 
 Actions depend on the controls exposed by each application. Unsupported actions are skipped. If a view changes concurrently, its newer position is preserved; a failed restoration stops further activity. Opening a temporary page can still affect the site's viewing history or activity log.
 
@@ -111,7 +112,7 @@ Comment entry, mail drafts and unread-channel navigation are currently unsupport
 | Orange tray icon | Paused for physical input, the open main window or a manual Stop. |
 | Original blue tray icon | Not yet started or stopped automatically at the scheduled finish. |
 
-Open windows are rediscovered between scenarios. Closed or unavailable windows are skipped; recently used windows are revisited with varied timing. Physical input interrupts the current scenario.
+Open windows and browser tabs are rediscovered between scenarios. Available targets are visited in shuffled rounds, avoiding the current window or tab when alternatives exist. Physical input interrupts the current scenario.
 
 ## Schedule and startup
 
@@ -194,7 +195,7 @@ Run `pnpm check:versions` to check version parity, or `pnpm release --dry-run` t
 
 Windows accessibility inspection identifies visible controls, browser domains, scroll percentages and native element identities. Scrolling records the exact control and its before/after positions; restoration proceeds only while the view still matches the action's result. Tab cleanup addresses the created tab by its native runtime identity and preserves a user-selected different tab. VS Code reviews use the same native identities to restore the sidebar and editor selection, avoid replacing preexisting preview tabs, and preserve an editor if it has acquired user edits.
 
-Browser routes are limited to HTTPS pages on the same origin. Link transitions require a visited link and a recognized document, ticket or code path. Mail and chat are excluded from activation and navigation to preserve message read states. No extension or service credentials are required.
+Existing HTTP and HTTPS tabs are identified through native accessibility controls without first activating them. Browser reading preserves the original scroll position and existing text selections. Supported mail list routes remain available for scrolling; conversation and notification routes are excluded when activation can change read states. These checks depend on the site's route and accessibility provider; unknown sites cannot provide a universal read-state guarantee. The older temporary-page helper restricts link transitions to visited HTTPS links on the same origin and recognized viewing routes. No extension or service credentials are required.
 
 </details>
 

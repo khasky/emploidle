@@ -51,6 +51,9 @@ function RestoreScroll($element, $pattern, $before, $after) {
     # A newer position belongs to the user or application, not this transaction.
     if ($null -eq $after -or [Math]::Abs($current.horizontal - $after.horizontal) -gt 0.001 -or
         [Math]::Abs($current.vertical - $after.vertical) -gt 0.001) { throw 'Scroll position changed outside this action; preserving the current view' }
+    $restoreTick = [EmploidleDesktop]::InputTick()
+    $pattern.SetScrollPercent([double]$before.horizontal, [double]$before.vertical)
+    if ([EmploidleDesktop]::InputTick() -ne $restoreTick) { throw 'Input changed during restoration; preserving the current view' }
     $pattern.SetScrollPercent([double]$before.horizontal, [double]$before.vertical)
     $needsChange = [Math]::Abs($current.horizontal - $before.horizontal) -gt 0.001 -or [Math]::Abs($current.vertical - $before.vertical) -gt 0.001
     $restored = WaitScrollPosition $element $pattern $current $needsChange
@@ -59,12 +62,17 @@ function RestoreScroll($element, $pattern, $before, $after) {
 }
 
 function BrowserControls($root) {
-    $elements = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    $classProperty = [System.Windows.Automation.AutomationElement]::ClassNameProperty
+    $condition = [System.Windows.Automation.OrCondition]::new([System.Windows.Automation.Condition[]]@(
+        [System.Windows.Automation.PropertyCondition]::new($classProperty, 'Tab'),
+        [System.Windows.Automation.PropertyCondition]::new($classProperty, 'OmniboxViewViews'),
+        [System.Windows.Automation.PropertyCondition]::new($classProperty, 'TabStripControlButton')))
+    $elements = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
     $tabs = [Collections.Generic.List[object]]::new()
     $selected = $null
     $address = $null
     $newTab = $null
-    for ($index = 0; $index -lt [Math]::Min($elements.Count, 700); $index++) {
+    for ($index = 0; $index -lt $elements.Count; $index++) {
         $element = $elements.Item($index)
         $current = $element.Current
         if ($current.ClassName -eq 'Tab' -and $current.ControlType -eq [System.Windows.Automation.ControlType]::TabItem) {
@@ -119,8 +127,8 @@ function NewBrowserTabs($controls, $previousIds) {
     }
 }
 
-function CheckInput {
-    if ([EmploidleDesktop]::GetForegroundWindow().ToInt64() -ne [long]$request.window) { throw 'The target window is no longer active' }
+function CheckInput([long]$foreground = [long]$request.window) {
+    if ([EmploidleDesktop]::GetForegroundWindow().ToInt64() -ne $foreground) { throw 'The target window is no longer active' }
     if ($null -ne $request.input_tick -and [EmploidleDesktop]::InputTick() -ne [uint32]$request.input_tick) { throw 'The action was interrupted by input' }
 }
 
@@ -128,11 +136,16 @@ try {
     Add-Type -AssemblyName UIAutomationClient
     Add-Type -AssemblyName UIAutomationTypes
     $request = [Console]::In.ReadLine() | ConvertFrom-Json
-    if ($request.operation -in @('scroll', 'open_tab', 'close_tab', 'review_tree', 'begin_editor', 'restore_editor')) {
-        Add-Type -TypeDefinition @'
+    Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 public static class EmploidleDesktop {
+    [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
+    public static System.Threading.Tasks.Task<string> ReadCancellation() {
+        // Console.In.ReadLineAsync uses a synchronized reader and can block its caller.
+        return System.Threading.Tasks.Task.Run(() => Console.In.ReadLine());
+    }
     [StructLayout(LayoutKind.Sequential)]
     private struct InputState { public uint Size; public uint Tick; }
     [DllImport("user32.dll")]
@@ -146,14 +159,19 @@ public static class EmploidleDesktop {
     }
 }
 '@
-    }
+    $null = [EmploidleDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
     $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]([long]$request.window))
     if ($null -eq $root -or $root.Current.ProcessId -ne [int]$request.process_id -or
-        ($root.Current.IsOffscreen -and $request.operation -notin @('restore', 'close_tab', 'restore_editor'))) {
+        ($root.Current.IsOffscreen -and $request.operation -notin @('restore', 'close_tab', 'restore_editor', 'browser_tabs', 'browser_context', 'select_tab'))) {
         throw 'The selected window is unavailable or belongs to a different process'
     }
     $rootRect = $root.Current.BoundingRectangle
+    if ($request.operation -eq 'browser_tabs') { Respond @{ tabs = @(ExistingBrowserTabs $root) }; exit }
+    if ($request.operation -eq 'select_tab') { SelectExistingBrowserTab $root; exit }
+    if ($request.operation -eq 'read_page') { ReadBrowserPage $root; exit }
     if ($request.operation -eq 'begin_editor') { BeginEditor $root ([uint32]$request.action); exit }
+    if ($request.operation -eq 'editor_file_target') { Respond (EditorFileTarget $root $request.session); exit }
+    if ($request.operation -eq 'capture_editor') { CaptureEditor $root $request.session; exit }
     if ($request.operation -eq 'restore_editor') { RestoreEditor $root $request.session ([bool]$request.interrupted); Respond $true; exit }
     if ($request.operation -in @('browser_context', 'open_tab', 'close_tab')) {
         if ($request.operation -eq 'close_tab') {
@@ -295,8 +313,9 @@ public static class EmploidleDesktop {
                 $rows.Add(@{ x = [int]$left; y = [int]$top; width = [int]($right - $left); height = [int]($bottom - $top) })
             }
         }
-        if ($kind -eq 'ControlType.Hyperlink' -and $links.Count -lt 24) {
-            $legacy = Pattern $element ([System.Windows.Automation.LegacyIAccessiblePattern]::Pattern)
+        $legacyType = 'System.Windows.Automation.LegacyIAccessiblePattern' -as [type]
+        if ($kind -eq 'ControlType.Hyperlink' -and $links.Count -lt 24 -and $null -ne $legacyType) {
+            $legacy = Pattern $element ($legacyType::Pattern)
             if ($null -ne $legacy) {
                 $address = [string]$legacy.Current.Value
                 if ($address -match '^https://' -and $address.Length -le 4096) {

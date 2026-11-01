@@ -3,7 +3,11 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { automationRequest, focusWindow } from "./lib/windows-automation.mjs";
+import {
+  automationRequest,
+  focusWindow,
+  openPreparedEditor,
+} from "./lib/windows-automation.mjs";
 
 assert.equal(process.platform, "win32");
 const executable = [
@@ -166,20 +170,27 @@ try {
   restored();
   assert.ok(run({ operation: "begin_editor", action: 0 }, false).session);
   restored();
-  const file = run({ operation: "begin_editor", action: 2 }).session;
+  const prepared = run({ operation: "begin_editor", action: 2 }).session;
+  assert.ok(prepared?.file, "A project file was not prepared");
+  const opened = openPreparedEditor(handle, prepared);
+  assert.ok(opened.ok, opened.error);
+  const file = opened.data;
   assert.ok(file?.created_editor, "A project file was not opened");
   assert.equal(state().tabs.length, originalTabs.length + 1);
   assert.equal(
     run({ operation: "begin_editor", action: 2 }).session,
     null,
-    "A preexisting preview was replaced",
+    "An already open visible file was selected again",
   );
   run({ operation: "restore_editor", session: file, interrupted: false });
   restored();
-  assert.ok(
-    run({ operation: "begin_editor", action: 2 }, false).session
-      ?.created_editor,
-  );
+  const rollbackPrepared = run({
+    operation: "begin_editor",
+    action: 2,
+  }).session;
+  const rolledBack = openPreparedEditor(handle, rollbackPrepared, false);
+  assert.ok(rolledBack.ok, rolledBack.error);
+  assert.ok(rolledBack.data.created_editor);
   restored();
   assert.equal(
     run({ operation: "review_tree", index: 0 }),
@@ -192,6 +203,54 @@ try {
     "Folder expansion state was changed",
   );
   restored();
+  powershell(`
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]${handle.window})
+$items = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+ [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::TreeItem))
+$notes = $items | Where-Object { $_.Current.Name -eq 'notes.md' } | Select-Object -First 1
+$notes.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+$notes.SetFocus()
+$folder = $items | Where-Object { $_.Current.Name -eq 'lib' } | Select-Object -First 1
+$folder.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+$folder.SetFocus()
+$folder.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+`);
+  const previewBefore = state();
+  assert.ok(
+    previewBefore.tabs.some((tab) => tab.name.includes(", preview")),
+    "The preview fixture did not open",
+  );
+  const previewPrepared = run({ operation: "begin_editor", action: 2 }).session;
+  assert.ok(
+    previewPrepared?.file,
+    "An existing preview prevented file preparation",
+  );
+  const pinned = openPreparedEditor(handle, previewPrepared);
+  assert.ok(pinned.ok, pinned.error);
+  const during = state();
+  for (const original of previewBefore.tabs)
+    assert.deepEqual(
+      during.tabs.find(
+        (tab) => JSON.stringify(tab.id) === JSON.stringify(original.id),
+      )?.name,
+      original.name,
+      "A preexisting preview was replaced or pinned",
+    );
+  run({
+    operation: "restore_editor",
+    session: pinned.data,
+    interrupted: false,
+  });
+  assert.deepEqual(
+    state().tabs,
+    previewBefore.tabs,
+    "The preexisting preview was not restored exactly",
+  );
+  for (const [name, text] of contents)
+    assert.equal(readFileSync(join(workspace, name), "utf8"), text);
   console.log(
     "PASS: native VS Code sidebar restoration, owned project-file cleanup, preview protection, acknowledgement rollback and folder restoration",
   );

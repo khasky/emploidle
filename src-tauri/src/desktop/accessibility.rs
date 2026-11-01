@@ -1,4 +1,6 @@
-use super::{BrowserContext, BrowserSession, EditorSession, ScrollReceipt, Snapshot};
+use super::{
+    Bounds, BrowserContext, BrowserSession, BrowserTab, EditorSession, ScrollReceipt, Snapshot,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     io::{Read, Write},
@@ -29,6 +31,15 @@ enum Operation {
         receipt: ScrollReceipt,
     },
     BrowserContext,
+    BrowserTabs,
+    SelectTab {
+        tab: BrowserTab,
+        foreground: u64,
+    },
+    ReadPage {
+        address: String,
+        select_text: bool,
+    },
     OpenTab,
     CloseTab {
         session: BrowserSession,
@@ -38,6 +49,12 @@ enum Operation {
     },
     BeginEditor {
         action: u32,
+    },
+    EditorFileTarget {
+        session: EditorSession,
+    },
+    CaptureEditor {
+        session: EditorSession,
     },
     RestoreEditor {
         session: EditorSession,
@@ -52,16 +69,18 @@ struct Response<T> {
     error: Option<String>,
     #[serde(default)]
     commit_required: bool,
+    #[serde(default)]
+    recovery: Option<ScrollReceipt>,
 }
 
 fn drain(
     mut pipe: impl Read + Send + 'static,
-    response: Option<mpsc::Sender<Vec<u8>>>,
+    mut response: Option<mpsc::Sender<Vec<u8>>>,
 ) -> thread::JoinHandle<std::io::Result<Vec<u8>>> {
     thread::spawn(move || {
         let mut output = Vec::new();
         let mut buffer = [0u8; 4096];
-        let mut response = response;
+        let mut line = Vec::new();
         loop {
             let read = pipe.read(&mut buffer)?;
             if read == 0 {
@@ -70,9 +89,24 @@ fn drain(
             // Continue draining after the cap so a noisy child cannot block on a full pipe.
             let retain = read.min(65_536usize.saturating_sub(output.len()));
             output.extend_from_slice(&buffer[..retain]);
-            if let Some(end) = output.iter().position(|byte| *byte == b'\n') {
-                if let Some(sender) = response.take() {
-                    let _ = sender.send(output[..end].to_vec());
+            if let Some(sender) = &response {
+                for byte in &buffer[..read] {
+                    if *byte == b'\n' {
+                        if sender.send(std::mem::take(&mut line)).is_err() {
+                            response = None;
+                            break;
+                        }
+                    } else {
+                        if line.len() >= 4 * 1024 * 1024 {
+                            let _ = sender.send(
+                                br#"{"ok":false,"error":"Accessibility reply exceeds the protocol limit"}"#.to_vec(),
+                            );
+                            response = None;
+                            line.clear();
+                            break;
+                        }
+                        line.push(*byte);
+                    }
                 }
             }
         }
@@ -80,6 +114,14 @@ fn drain(
 }
 
 fn run<T: for<'de> Deserialize<'de>>(request: Request) -> Result<T, String> {
+    run_guarded(request, Duration::from_secs(3), || false)
+}
+
+fn run_guarded<T: for<'de> Deserialize<'de>>(
+    request: Request,
+    budget: Duration,
+    cancelled: impl Fn() -> bool,
+) -> Result<T, String> {
     #[derive(Serialize)]
     struct Envelope {
         #[serde(flatten)]
@@ -88,7 +130,7 @@ fn run<T: for<'de> Deserialize<'de>>(request: Request) -> Result<T, String> {
     }
     let mutating = !matches!(
         request.operation,
-        Operation::Inspect | Operation::BrowserContext
+        Operation::Inspect | Operation::BrowserContext | Operation::BrowserTabs
     );
     let payload = serde_json::to_vec(&Envelope {
         request,
@@ -127,8 +169,9 @@ fn run<T: for<'de> Deserialize<'de>>(request: Request) -> Result<T, String> {
             .as_mut()
             .ok_or("Missing accessibility request input")?;
         let script = format!(
-            "{}\n{}",
+            "{}\n{}\n{}",
             include_str!("vscode.ps1"),
+            include_str!("browser.ps1"),
             include_str!("accessibility.ps1")
         );
         let script = serde_json::to_vec(&script).map_err(|error| error.to_string())?;
@@ -140,26 +183,53 @@ fn run<T: for<'de> Deserialize<'de>>(request: Request) -> Result<T, String> {
             .write_all(&payload)
             .and_then(|()| input.write_all(b"\n"))
             .map_err(|error| format!("Cannot send accessibility request: {error}"))?;
-        let response = receiver
-            .recv_timeout(Duration::from_secs(3))
-            .map_err(|error| format!("Windows accessibility response unavailable: {error}"))?;
-        let response: Response<T> = serde_json::from_slice(&response)
-            .map_err(|error| format!("Invalid accessibility response: {error}"))?;
-        if !response.ok {
-            return Err(response
-                .error
-                .unwrap_or_else(|| "Accessibility operation failed".into()));
+        let deadline = Instant::now() + budget;
+        let mut cancellation_sent = false;
+        loop {
+            if !cancellation_sent && cancelled() {
+                input
+                    .write_all(b"cancel\n")
+                    .map_err(|error| format!("Cannot interrupt accessibility action: {error}"))?;
+                cancellation_sent = true;
+            }
+            if Instant::now() >= deadline {
+                return Err("Windows accessibility action exceeded its deadline".into());
+            }
+            let response = match receiver.recv_timeout(Duration::from_millis(30)) {
+                Ok(response) => response,
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(error) => {
+                    return Err(format!(
+                        "Windows accessibility response unavailable: {error}"
+                    ))
+                }
+            };
+            let response: Response<T> = serde_json::from_slice(&response)
+                .map_err(|error| format!("Invalid accessibility response: {error}"))?;
+            if !response.ok {
+                return Err(response
+                    .error
+                    .unwrap_or_else(|| "Accessibility operation failed".into()));
+            }
+            if response.recovery.is_some() {
+                if response.commit_required && !cancellation_sent {
+                    input
+                        .write_all(b"commit\n")
+                        .map_err(|error| format!("Cannot acknowledge reading recovery: {error}"))?;
+                }
+                continue;
+            }
+            let data = response
+                .data
+                .ok_or("Accessibility provider returned no result")?;
+            // Acknowledge only after the recovery identity has reached the parent intact.
+            if response.commit_required {
+                input.write_all(b"commit\n").map_err(|error| {
+                    format!("Cannot acknowledge accessibility response: {error}")
+                })?;
+            }
+            return Ok(data);
         }
-        let data = response
-            .data
-            .ok_or("Accessibility provider returned no result")?;
-        // Acknowledge only after the recovery identity has reached the parent intact.
-        if response.commit_required {
-            input
-                .write_all(b"commit\n")
-                .map_err(|error| format!("Cannot acknowledge accessibility response: {error}"))?;
-        }
-        Ok(data)
     })();
     drop(child.stdin.take());
     if mutating {
@@ -244,12 +314,85 @@ pub fn restore_editor(
     .map(|_| ())
 }
 
+pub fn editor_file_target(
+    window: u64,
+    process_id: u32,
+    session: EditorSession,
+) -> Result<Bounds, String> {
+    run(Request {
+        window,
+        process_id,
+        operation: Operation::EditorFileTarget { session },
+    })
+}
+
+pub fn capture_editor(
+    window: u64,
+    process_id: u32,
+    session: EditorSession,
+) -> Result<EditorSession, String> {
+    run(Request {
+        window,
+        process_id,
+        operation: Operation::CaptureEditor { session },
+    })
+}
+
 pub fn browser_context(window: u64, process_id: u32) -> Result<BrowserContext, String> {
     run(Request {
         window,
         process_id,
         operation: Operation::BrowserContext,
     })
+}
+
+pub fn browser_tabs(window: u64, process_id: u32) -> Result<Vec<BrowserTab>, String> {
+    #[derive(Deserialize)]
+    struct Tabs {
+        tabs: Vec<BrowserTab>,
+    }
+    run::<Tabs>(Request {
+        window,
+        process_id,
+        operation: Operation::BrowserTabs,
+    })
+    .map(|data| data.tabs)
+}
+
+pub fn select_tab(
+    window: u64,
+    process_id: u32,
+    tab: BrowserTab,
+    foreground: u64,
+) -> Result<(), String> {
+    run::<bool>(Request {
+        window,
+        process_id,
+        operation: Operation::SelectTab { tab, foreground },
+    })
+    .map(|_| ())
+}
+
+pub fn read_page(
+    window: u64,
+    process_id: u32,
+    address: String,
+    select_text: bool,
+    cancelled: impl Fn() -> bool,
+) -> Result<(), String> {
+    run_guarded::<bool>(
+        Request {
+            window,
+            process_id,
+            operation: Operation::ReadPage {
+                address,
+                select_text,
+            },
+        },
+        Duration::from_secs(25),
+        cancelled,
+    )
+    .map(|_| ())
 }
 
 pub fn open_tab(window: u64, process_id: u32) -> Result<BrowserSession, String> {
@@ -303,6 +446,45 @@ pub fn restore(window: u64, process_id: u32, receipt: ScrollReceipt) -> Result<(
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn complete_protocol_lines_arrive_after_the_log_capture_limit() {
+        let first = b"{\"ok\":true,\"recovery\":{}}\n";
+        let mut payload = first.to_vec();
+        let second = vec![b'x'; 80_000];
+        payload.extend_from_slice(&second);
+        payload.push(b'\n');
+        payload.extend_from_slice(b"{\"ok\":true,\"data\":true}\n");
+        let (sender, receiver) = mpsc::channel();
+        let output = drain(Cursor::new(payload), Some(sender));
+        assert_eq!(
+            receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+            &first[..first.len() - 1]
+        );
+        assert_eq!(
+            receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+            second
+        );
+        assert_eq!(
+            receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+            b"{\"ok\":true,\"data\":true}"
+        );
+        assert_eq!(output.join().unwrap().unwrap().len(), 65_536);
+    }
+
+    #[test]
+    fn oversized_protocol_lines_are_rejected_while_output_keeps_draining() {
+        let (sender, receiver) = mpsc::channel();
+        let output = drain(Cursor::new(vec![b'x'; 5 * 1024 * 1024]), Some(sender));
+        let response: Response<bool> = serde_json::from_slice(&receiver.recv().unwrap()).unwrap();
+        assert!(!response.ok);
+        assert_eq!(
+            response.error.unwrap(),
+            "Accessibility reply exceeds the protocol limit"
+        );
+        assert!(receiver.recv().is_err());
+        assert_eq!(output.join().unwrap().unwrap().len(), 65_536);
+    }
 
     struct AwaitingAcknowledgement {
         response: Cursor<Vec<u8>>,

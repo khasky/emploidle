@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use enigo::{Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
+use enigo::{Button, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
 use rand::Rng;
 use tauri::{AppHandle, Emitter};
 
@@ -437,55 +438,103 @@ fn external_action(
     Ok(())
 }
 
-fn choose_target(
-    targets: &[u64],
-    current: Option<u64>,
-    previous: Option<u64>,
-    rng: &mut impl Rng,
-) -> u64 {
-    if targets.len() > 1 {
-        if rng.random_bool(0.65) {
-            if let Some(target) = targets
-                .iter()
-                .find(|target| Some(**target) == previous && Some(**target) != current)
-            {
-                return *target;
-            }
-        }
-        let alternatives: Vec<_> = targets
-            .iter()
-            .copied()
-            .filter(|target| Some(*target) != current)
-            .collect();
-        if !alternatives.is_empty() {
-            return alternatives[rng.random_range(0..alternatives.len())];
-        }
-    }
-    targets[rng.random_range(0..targets.len())]
-}
-
 fn review_editor(
     e: &mut Enigo,
     guard: &Guard<'_>,
     source: &desktop::WindowInfo,
     rng: &mut impl Rng,
+    action: u32,
 ) -> StepResult {
     guard.check()?;
-    let Some(session) = desktop::begin_editor_review(source.id, source.process_id, rng.random())
-        .map_err(StepError::RestorationFailed)?
+    let Some(mut session) = desktop::begin_editor_review(
+        source.id,
+        source.process_id,
+        action + 3 * rng.random_range(0..100_000),
+    )
+    .map_err(StepError::RestorationFailed)?
     else {
         return Ok(());
     };
     let result = (|| {
+        if let Some(file) = &session.file {
+            let bounds = file.bounds;
+            if let Some(window) = desktop::window_bounds(source.id) {
+                // Leave an existing Explorer tooltip before approaching the next file.
+                smooth_point(
+                    e,
+                    guard,
+                    (
+                        window.x + window.width * 3 / 4,
+                        window.y + window.height / 2,
+                    ),
+                    rng,
+                )?;
+            }
+            smooth_point(
+                e,
+                guard,
+                (bounds.x + bounds.width / 2, bounds.y + bounds.height / 2),
+                rng,
+            )?;
+            let fresh = desktop::editor_file_target(source.id, source.process_id, session.clone())
+                .map_err(StepError::Failed)?;
+            if (fresh.x, fresh.y, fresh.width, fresh.height)
+                != (bounds.x, bounds.y, bounds.width, bounds.height)
+            {
+                return Err(StepError::Interrupted);
+            }
+            guard.input(|| e.button(Button::Middle, Direction::Click))?;
+            session = desktop::capture_editor_review(source.id, source.process_id, session.clone())
+                .map_err(StepError::RestorationFailed)?;
+            guard.check()?;
+        }
         guard.wait(Duration::from_millis(rng.random_range(300..=650)))?;
-        let snapshot = desktop::inspect_window(source.id, source.process_id).ok();
-        external_action(Action::Move, e, guard, source, snapshot.as_ref(), rng)?;
-        guard.wait(Duration::from_millis(rng.random_range(400..=1_100)))
+        if action != 2 {
+            if let Some(bounds) = desktop::window_bounds(source.id) {
+                smooth_point(
+                    e,
+                    guard,
+                    (bounds.x + bounds.width / 3, bounds.y + bounds.height / 3),
+                    rng,
+                )?;
+            }
+        }
+        guard.wait(Duration::from_millis(rng.random_range(400..=900)))
     })();
     let interrupted = !guard.controller.session_valid(guard.epoch);
     let restored =
         desktop::restore_editor_review(source.id, source.process_id, session, interrupted)
             .map_err(StepError::RestorationFailed);
+    restored.and(result)
+}
+
+fn review_editor_sequence(
+    e: &mut Enigo,
+    guard: &Guard<'_>,
+    source: &desktop::WindowInfo,
+    rng: &mut impl Rng,
+) -> StepResult {
+    review_editor(e, guard, source, rng, 0)?;
+    guard.check()?;
+    let explorer = desktop::begin_editor_review(source.id, source.process_id, 1)
+        .map_err(StepError::RestorationFailed)?;
+    let result = (|| {
+        guard.wait(Duration::from_millis(rng.random_range(450..=850)))?;
+        desktop::review_tree(source.id, source.process_id, rng.random())
+            .map_err(StepError::RestorationFailed)?;
+        review_editor(e, guard, source, rng, 2)
+    })();
+    let restored = if let Some(session) = explorer {
+        desktop::restore_editor_review(
+            source.id,
+            source.process_id,
+            session,
+            !guard.controller.session_valid(guard.epoch),
+        )
+        .map_err(StepError::RestorationFailed)
+    } else {
+        Ok(())
+    };
     restored.and(result)
 }
 
@@ -558,14 +607,14 @@ pub fn spawn_worker(controller: Arc<Controller>, app: AppHandle) {
     thread::spawn(move || {
         let mut rng = rand::rng();
         let mut enigo = None;
-        let mut current = None;
-        let mut previous = None;
+        let mut window_rotation = Vec::new();
+        let mut tab_rotations: HashMap<u64, Vec<Vec<i32>>> = HashMap::new();
         loop {
             controller.refresh_tray(&app);
             if !controller.running.load(Ordering::SeqCst) {
                 enigo = None;
-                current = None;
-                previous = None;
+                window_rotation.clear();
+                tab_rotations.clear();
                 thread::sleep(Duration::from_millis(120));
                 continue;
             }
@@ -600,77 +649,141 @@ pub fn spawn_worker(controller: Arc<Controller>, app: AppHandle) {
                         })?,
                     );
                 }
-                let targets =
-                    automatic_targets(&desktop::list_windows().map_err(StepError::Failed)?);
-                if targets.is_empty() {
-                    controller.report(&app, "Waiting for an open application window...");
+                let foreground = desktop::foreground_window();
+                let windows = desktop::list_windows().map_err(StepError::Failed)?;
+                let discovered = automatic_targets(&windows);
+                let mut targets = Vec::new();
+                for source in windows
+                    .into_iter()
+                    .filter(|source| discovered.contains(&source.id))
+                {
+                    if SourceKind::is_browser(&source.application) {
+                        let tabs = desktop::browser_tabs(source.id, source.process_id)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter(|tab| SourceKind::allows_reading(&tab.address))
+                            .collect::<Vec<_>>();
+                        if !tabs.is_empty() || foreground == Some(source.id) {
+                            targets.push((source, tabs));
+                        }
+                    } else if SourceKind::detect(None, &source.application).can_activate()
+                        || foreground == Some(source.id)
+                    {
+                        targets.push((source, Vec::new()));
+                    }
+                }
+                let available: Vec<_> = targets.iter().map(|(source, _)| source.id).collect();
+                tab_rotations.retain(|id, _| discovered.contains(id));
+                let Some(source_window) = activity_plan::next_target(
+                    &mut window_rotation,
+                    &available,
+                    foreground.as_ref(),
+                    &mut rng,
+                ) else {
+                    controller.report(
+                        &app,
+                        "Waiting for an available application or readable browser tab...",
+                    );
                     thread::sleep(Duration::from_millis(500));
                     return Err(StepError::Interrupted);
-                }
-                let source_window = choose_target(&targets, current, previous, &mut rng);
-                previous = current;
-                current = Some(source_window);
-                if !controller.session_valid(epoch) {
-                    return Err(StepError::Interrupted);
-                }
+                };
+                let (source, tabs) = targets
+                    .into_iter()
+                    .find(|(source, _)| source.id == source_window)
+                    .unwrap();
                 let guard = Guard {
                     controller: &controller,
                     epoch,
                     window: source_window,
                 };
-                let source = desktop::list_windows()
-                    .map_err(StepError::Failed)?
-                    .into_iter()
-                    .find(|source| {
-                        source.id == source_window && source.process_id != std::process::id()
-                    });
-                let snapshot = source
-                    .as_ref()
-                    .and_then(|source| desktop::inspect_window(source.id, source.process_id).ok());
-                if let Some(source) = &source {
-                    guard.check_input()?;
-                    if desktop::foreground_window() != Some(source.id) {
-                        let kind = SourceKind::detect(
-                            snapshot
-                                .as_ref()
-                                .and_then(|snapshot| snapshot.domain.as_deref()),
-                            &source.application,
-                        );
-                        if !kind.can_activate() {
-                            thread::sleep(Duration::from_millis(250));
-                            return Err(StepError::Interrupted);
-                        }
-                        guard.focus()?;
+                guard.check_input()?;
+                if !tabs.is_empty() {
+                    let selected = tabs.iter().find(|tab| tab.selected).map(|tab| &tab.id);
+                    let ids: Vec<_> = tabs.iter().map(|tab| tab.id.clone()).collect();
+                    let id = activity_plan::next_target(
+                        tab_rotations.entry(source.id).or_default(),
+                        &ids,
+                        selected,
+                        &mut rng,
+                    )
+                    .unwrap();
+                    let tab = tabs.into_iter().find(|tab| tab.id == id).unwrap();
+                    controller.report(&app, "Browser: selecting an existing tab");
+                    desktop::select_browser_tab(
+                        source.id,
+                        source.process_id,
+                        tab.clone(),
+                        foreground.unwrap_or(0),
+                    )
+                    .map_err(StepError::Failed)?;
+                    guard.focus()?;
+                    let e = enigo.as_mut().unwrap();
+                    if let Some(bounds) = desktop::window_bounds(source.id) {
+                        smooth_point(
+                            e,
+                            &guard,
+                            (
+                                bounds.x + bounds.width * 2 / 3,
+                                bounds.y + bounds.height / 2,
+                            ),
+                            &mut rng,
+                        )?;
                     }
+                    let page_kind = SourceKind::detect(
+                        tauri::Url::parse(&tab.address)
+                            .ok()
+                            .as_ref()
+                            .and_then(tauri::Url::host_str),
+                        &source.application,
+                    );
+                    let select_text = page_kind != SourceKind::Mail && rng.random_bool(0.35);
+                    controller.report(
+                        &app,
+                        if select_text {
+                            "Browser: reviewing text and clearing the selection"
+                        } else {
+                            "Browser: scrolling down and returning to the original position"
+                        },
+                    );
+                    desktop::read_browser_page(
+                        source.id,
+                        source.process_id,
+                        tab.address,
+                        select_text,
+                        || guard.check().is_err(),
+                    )
+                    .map_err(|error| {
+                        if error.contains("preserving the current view") {
+                            StepError::Interrupted
+                        } else {
+                            StepError::RestorationFailed(error)
+                        }
+                    })?;
+                    guard.check()?;
+                    return Ok(());
                 }
+                if SourceKind::detect(None, &source.application).can_activate() {
+                    guard.focus()?;
+                }
+                let snapshot = desktop::inspect_window(source.id, source.process_id).ok();
                 guard.check()?;
                 guard.wait(Duration::from_millis(400))?;
                 let e = enigo.as_mut().unwrap();
-                if let (Some(source), Some(snapshot)) = (&source, &snapshot) {
-                    if SourceKind::detect(snapshot.domain.as_deref(), &source.application)
-                        == SourceKind::Ide
-                    {
-                        if rng.random_bool(0.35) {
-                            guard.check()?;
-                            let _ =
-                                desktop::review_tree(source.id, source.process_id, rng.random())
-                                    .map_err(StepError::RestorationFailed)?;
-                        }
-                        if rng.random_bool(0.8) {
-                            review_editor(e, &guard, source, &mut rng)?;
-                        }
-                    }
-                    if rng.random_bool(0.3) {
-                        review_browser(e, &guard, source, snapshot, &mut rng)?;
+                if SourceKind::detect(None, &source.application) == SourceKind::Ide {
+                    controller.report(&app, "IDE: extensions, project tree and a project file");
+                    review_editor_sequence(e, &guard, &source, &mut rng)?;
+                    return Ok(());
+                }
+                if let Some(snapshot) = &snapshot {
+                    if !SourceKind::is_browser(&source.application) && rng.random_bool(0.3) {
+                        review_browser(e, &guard, &source, snapshot, &mut rng)?;
                     }
                 }
                 let kind = SourceKind::detect(
                     snapshot
                         .as_ref()
                         .and_then(|snapshot| snapshot.domain.as_deref()),
-                    source
-                        .as_ref()
-                        .map_or("", |source| source.application.as_str()),
+                    &source.application,
                 );
                 let can_scroll = kind.can_scroll()
                     && snapshot
@@ -685,10 +798,7 @@ pub fn spawn_worker(controller: Arc<Controller>, app: AppHandle) {
                 let started = Instant::now();
                 while started.elapsed() < Duration::from_millis(plan.duration_ms) {
                     let (action, pause) = plan.next(&mut rng);
-                    let source = source.as_ref().ok_or_else(|| {
-                        StepError::Failed("The window is no longer available.".into())
-                    })?;
-                    external_action(action, e, &guard, source, snapshot.as_ref(), &mut rng)?;
+                    external_action(action, e, &guard, &source, snapshot.as_ref(), &mut rng)?;
                     let remaining =
                         Duration::from_millis(plan.duration_ms).saturating_sub(started.elapsed());
                     guard.wait(Duration::from_millis(pause).min(remaining))?;
@@ -839,17 +949,34 @@ mod tests {
     }
 
     #[test]
-    fn target_memory_returns_to_previous_discovered_windows() {
+    fn target_rotation_visits_all_windows_without_repeats_or_starvation() {
         let mut rng = StdRng::seed_from_u64(2);
         let targets = [1, 2, 3];
-        let mut returns = 0;
+        let mut remaining = Vec::new();
+        let mut current = None;
         for _ in 0..100 {
-            let target = choose_target(&targets, Some(2), Some(1), &mut rng);
-            assert!(targets.contains(&target));
-            assert_ne!(target, 2);
-            returns += usize::from(target == 1);
+            let mut visited = std::collections::HashSet::new();
+            for _ in 0..targets.len() {
+                let next = activity_plan::next_target(
+                    &mut remaining,
+                    &targets,
+                    current.as_ref(),
+                    &mut rng,
+                )
+                .unwrap();
+                assert_ne!(Some(next), current);
+                assert!(visited.insert(next));
+                current = Some(next);
+            }
+            assert_eq!(visited.len(), targets.len());
         }
-        assert!(returns > 50);
-        assert_eq!(choose_target(&targets[..1], Some(1), None, &mut rng), 1);
+        assert_eq!(
+            activity_plan::next_target(&mut remaining, &[1], Some(&1), &mut rng),
+            Some(1)
+        );
+        assert_eq!(
+            activity_plan::next_target(&mut remaining, &[], None, &mut rng),
+            None
+        );
     }
 }

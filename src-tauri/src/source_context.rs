@@ -8,6 +8,7 @@ pub enum SourceKind {
     Calendar,
     Chat,
     Ide,
+    Browser,
     Unknown,
 }
 
@@ -28,6 +29,7 @@ impl SourceKind {
                 | Self::Repository
                 | Self::Calendar
                 | Self::Ide
+                | Self::Browser
         )
     }
 
@@ -133,9 +135,17 @@ impl SourceKind {
             let host = host.to_ascii_lowercase();
             for (base, kind) in [
                 ("mail.google.com", Self::Mail),
+                ("outlook.live.com", Self::Mail),
+                ("outlook.office.com", Self::Mail),
+                ("outlook.office365.com", Self::Mail),
                 ("calendar.google.com", Self::Calendar),
                 ("slack.com", Self::Chat),
                 ("discord.com", Self::Chat),
+                ("teams.microsoft.com", Self::Chat),
+                ("teams.live.com", Self::Chat),
+                ("chat.google.com", Self::Chat),
+                ("web.whatsapp.com", Self::Chat),
+                ("web.telegram.org", Self::Chat),
                 ("notion.so", Self::Notion),
                 ("notion.site", Self::Notion),
                 ("atlassian.net", Self::Jira),
@@ -155,6 +165,7 @@ impl SourceKind {
             | "clion64" | "goland64" | "rustrover64" => Self::Ide,
             "notepad" | "winword" | "wordpad" | "excel" | "powerpnt" | "soffice" | "textedit"
             | "gedit" | "kate" | "evince" | "okular" | "sumatrapdf" | "acrord32" => Self::Document,
+            _ if domain.is_some() && Self::is_browser(&application) => Self::Browser,
             _ => Self::Unknown,
         }
     }
@@ -169,7 +180,79 @@ impl SourceKind {
             Self::Calendar => "Calendar view",
             Self::Chat => "Channel view",
             Self::Ide => "IDE view",
+            Self::Browser => "Browser page",
             Self::Unknown => "Accessible view",
+        }
+    }
+
+    pub fn is_browser(application: &str) -> bool {
+        matches!(
+            application.to_ascii_lowercase().trim_end_matches(".exe"),
+            "chrome" | "chromium" | "msedge" | "brave" | "vivaldi" | "opera"
+        )
+    }
+
+    pub fn allows_reading(address: &str) -> bool {
+        let Ok(url) = tauri::Url::parse(address) else {
+            return false;
+        };
+        if !matches!(url.scheme(), "http" | "https")
+            || url.host_str().is_none()
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
+            return false;
+        }
+        match Self::detect(url.host_str(), "chrome.exe") {
+            Self::Chat => false,
+            Self::Mail => {
+                let gmail = url.host_str() == Some("mail.google.com")
+                    && matches!(
+                        url.fragment(),
+                        Some("inbox" | "sent" | "starred" | "all" | "drafts")
+                    );
+                let outlook = url.host_str().is_some_and(|host| {
+                    [
+                        "outlook.live.com",
+                        "outlook.office.com",
+                        "outlook.office365.com",
+                    ]
+                    .iter()
+                    .any(|base| host_matches(host, base))
+                }) && matches!(
+                    url.path().trim_end_matches('/'),
+                    "/mail/inbox" | "/mail/0/inbox" | "/mail/sentitems" | "/mail/0/sentitems"
+                );
+                url.query().is_none() && (gmail || outlook)
+            }
+            _ => {
+                let communication_host = url.host_str().is_some_and(|host| {
+                    host.split('.')
+                        .any(|part| matches!(part, "chat" | "mail" | "webmail" | "messenger"))
+                });
+                !communication_host
+                    && !url
+                        .path()
+                        .split('/')
+                        .chain(url.fragment().unwrap_or_default().split('/'))
+                        .any(|part| {
+                            matches!(
+                                part.to_ascii_lowercase().as_str(),
+                                "inbox"
+                                    | "notifications"
+                                    | "chat"
+                                    | "messages"
+                                    | "unread"
+                                    | "room"
+                                    | "rooms"
+                                    | "channel"
+                                    | "channels"
+                                    | "conversation"
+                                    | "conversations"
+                                    | "dm"
+                            )
+                        })
+            }
         }
     }
 }
@@ -257,12 +340,59 @@ mod tests {
             assert_eq!(SourceKind::detect(Some(domain), "chrome.exe"), expected);
             assert_eq!(
                 SourceKind::detect(Some(&format!("{domain}.example.org")), "chrome.exe"),
-                SourceKind::Unknown
+                SourceKind::Browser
             );
         }
         assert_eq!(
             SourceKind::detect(Some("evilgithub.com"), "chrome.exe"),
-            SourceKind::Unknown
+            SourceKind::Browser
         );
+        assert!(!SourceKind::Browser.can_browse());
+        assert!(!SourceKind::Browser
+            .allows_page(&tauri::Url::parse("https://evilgithub.com/team/project").unwrap()));
+    }
+
+    #[test]
+    fn ordinary_browser_pages_remain_available_for_reading() {
+        assert_eq!(
+            SourceKind::detect(Some("example.org"), "chrome.exe"),
+            SourceKind::Browser
+        );
+        assert!(SourceKind::Browser.can_activate());
+        assert!(SourceKind::Browser.can_scroll());
+        for address in [
+            "https://example.org/article",
+            "http://localhost:3000/docs",
+            "https://github.com/team/project?tab=readme",
+        ] {
+            assert!(SourceKind::allows_reading(address), "{address}");
+        }
+    }
+
+    #[test]
+    fn communication_lists_can_be_read_without_opening_a_conversation() {
+        assert!(SourceKind::allows_reading(
+            "https://mail.google.com/mail/u/0/#inbox"
+        ));
+        assert!(SourceKind::allows_reading(
+            "https://outlook.office.com/mail/inbox"
+        ));
+        for address in [
+            "https://mail.google.com/mail/u/0/#inbox/message-id",
+            "https://mail.google.com/mail/u/0/?compose=new#inbox",
+            "https://outlook.office.com/mail/inbox/id/message-id",
+            "https://app.slack.com/client/workspace/channel",
+            "https://discord.com/channels/server/channel",
+            "https://example.org/notifications",
+            "https://example.org/chat",
+            "https://example.org/#messages",
+            "https://chat.example.org/room/general",
+            "https://example.org/room/general",
+            "https://messenger.example.org/",
+            "javascript:alert(1)",
+            "https://name:password@example.org/article",
+        ] {
+            assert!(!SourceKind::allows_reading(address), "{address}");
+        }
     }
 }

@@ -48,7 +48,7 @@ function EditorSelectionRestorable($selected, $editors) {
     if ($selected.Count -ne 1) { return $false }
     $item = $selected[0]
     $expand = Pattern $item ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
-    return $null -ne $expand -and ($expand.Current.ExpandCollapseState -ne [System.Windows.Automation.ExpandCollapseState]::LeafNode -or @($editors | Where-Object { $_.Current.Name -eq $item.Current.Name }).Count -gt 0)
+    return $null -ne $expand -and ($expand.Current.ExpandCollapseState -ne [System.Windows.Automation.ExpandCollapseState]::LeafNode -or @($editors | Where-Object { (EditorFileName $_) -eq $item.Current.Name }).Count -eq 1)
 }
 
 function EditorInputOwned {
@@ -160,13 +160,7 @@ function BeginEditor($root, [uint32]$choice) {
     $activeEditor = $null
     foreach ($editor in $controls.editors) {
         if ((Pattern $editor ([System.Windows.Automation.SelectionItemPattern]::Pattern)).Current.IsSelected) { $activeEditor = $editor }
-        if ($action -eq 2) {
-            # A file selected in Explorer replaces an existing preview, so refuse that layout.
-            $children = $editor.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-            if ($editor.Current.Name -match ',|unsaved|несохран' -or @($children | Where-Object { $_.Current.ClassName -match '(^|\s)italic(\s|$)' }).Count -gt 0) {
-                Respond @{ session = $null }; return
-            }
-        }
+
     }
     if ($action -eq 2) {
         $containers = @($controls.editors | ForEach-Object { ((Pattern $_ ([System.Windows.Automation.SelectionItemPattern]::Pattern)).Current.SelectionContainer.GetRuntimeId()) -join ',' } | Select-Object -Unique)
@@ -177,7 +171,8 @@ function BeginEditor($root, [uint32]$choice) {
         original_view = @($controls.original.GetRuntimeId()); target_view = @($target.GetRuntimeId())
         original_focus = if ($null -ne $focus -and $focus.Current.ProcessId -eq $root.Current.ProcessId) { @($focus.GetRuntimeId()) } else { $null }
         original_editor = if ($null -ne $activeEditor) { @($activeEditor.GetRuntimeId()) } else { $null }
-        created_editor = $null; tree_selection = @()
+        created_editor = $null; tree_selection = @(); file = $null
+        original_editors = @($controls.editors | ForEach-Object { ,([int[]]$_.GetRuntimeId()) })
     }
     $committed = $false
     try {
@@ -193,7 +188,7 @@ function BeginEditor($root, [uint32]$choice) {
             $selected = @($selection.Current.GetSelection())
             $items = $tree.FindAll([System.Windows.Automation.TreeScope]::Descendants,
                 [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::TreeItem))
-            $names = @($controls.editors | ForEach-Object { $_.Current.Name })
+            $names = @($controls.editors | ForEach-Object { EditorFileName $_ })
             $files = @($items | Where-Object {
                 -not $_.Current.IsOffscreen -and $_.Current.Name -match '\.(rs|js|ts|tsx|jsx|py|go|java|cs|cpp|cc|c|h|md|txt|json|toml|yaml|yml|css|html)$' -and
                 $names -notcontains $_.Current.Name -and
@@ -204,18 +199,9 @@ function BeginEditor($root, [uint32]$choice) {
             $session.tree_selection = @($selected | ForEach-Object { ,([int[]]$_.GetRuntimeId()) })
             CheckInput
             $file = $files[[int]([Math]::Floor($choice / 3) % $files.Count)]
-            EditorSelect $file
-            $file.SetFocus()
-            $timer = [Diagnostics.Stopwatch]::StartNew()
-            do {
-                $fresh = EditorControls $root
-                $added = @($fresh.editors | Where-Object { $candidate = $_; -not @($controls.editors | Where-Object { SameElement $candidate $_.GetRuntimeId() }).Count })
-                CheckInput
-                if ($added.Count -eq 1) { $session.created_editor = @($added[0].GetRuntimeId()); break }
-                Start-Sleep -Milliseconds 15
-            } while ($timer.ElapsedMilliseconds -lt 700)
-            if ($null -eq $session.created_editor) { throw 'The opened editor could not be identified' }
-            $null = EditorClose $added[0]
+            $bounds = $file.Current.BoundingRectangle
+            $session.file = @{ element = @($file.GetRuntimeId()); name = $file.Current.Name; bounds = @{ x = [int]$bounds.Left; y = [int]$bounds.Top; width = [int]$bounds.Width; height = [int]$bounds.Height } }
+
         }
         Respond @{ session = $session } $true
         $committed = [Console]::In.ReadLine() -eq 'commit'
@@ -226,4 +212,57 @@ function BeginEditor($root, [uint32]$choice) {
         }
     }
     if (-not $committed) { return }
+}
+
+function EditorFileName($tab) {
+    return $tab.Current.Name -replace ', (preview|предпросмотр|предварительный просмотр)$', ''
+}
+
+function EditorFileTarget($root, $session) {
+    CheckInput
+    foreach ($key in @(0x10, 0x11, 0x12, 0x5b, 0x5c)) {
+        if ([EmploidleDesktop]::GetAsyncKeyState($key) -lt 0) { throw 'The project file action was interrupted by a held modifier' }
+    }
+    $file = EditorElement $root $session.file.element
+    if ($null -eq $file -or $file.Current.Name -cne $session.file.name -or $file.Current.IsOffscreen -or
+        $file.Current.ControlType -ne [System.Windows.Automation.ControlType]::TreeItem) { throw 'The project file moved before opening' }
+    $bounds = $file.Current.BoundingRectangle
+    $point = [System.Windows.Point]::new($bounds.Left + $bounds.Width / 2, $bounds.Top + $bounds.Height / 2)
+    $element = [System.Windows.Automation.AutomationElement]::FromPoint($point)
+    $hitType = if ($null -ne $element) { $element.Current.ControlType.ProgrammaticName } else { 'unavailable' }
+    $found = $false
+    for ($depth = 0; $depth -lt 12 -and $null -ne $element; $depth++) {
+        if (SameElement $element $session.file.element) { $found = $true; break }
+        $element = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($element)
+    }
+    if (-not $found) { throw "The project file is covered by another control ($hitType)" }
+    CheckInput
+    return @{ x = [int]$bounds.Left; y = [int]$bounds.Top; width = [int]$bounds.Width; height = [int]$bounds.Height }
+}
+
+function CaptureEditor($root, $session) {
+    CheckInput
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $controls = EditorControls $root
+        $added = @($controls.editors | Where-Object { $candidate = $_; -not @($session.original_editors | Where-Object { SameElement $candidate $_ }).Count })
+        CheckInput
+        if ($added.Count -eq 1 -and (EditorFileName $added[0]) -ceq $session.file.name) { break }
+        Start-Sleep -Milliseconds 15
+    } while ($timer.ElapsedMilliseconds -lt 700)
+    if ($added.Count -ne 1 -or (EditorFileName $added[0]) -cne $session.file.name) { throw 'The opened project editor could not be identified; preserving it' }
+    foreach ($id in $session.original_editors) {
+        if (-not @($controls.editors | Where-Object { SameElement $_ $id }).Count) { throw 'A preexisting editor changed; preserving the current editors' }
+    }
+    CheckInput
+    $session.created_editor = @($added[0].GetRuntimeId())
+    $session.file = $null
+    $null = EditorClose $added[0]
+    $committed = $false
+    try {
+        Respond $session $true
+        $committed = [Console]::In.ReadLine() -eq 'commit'
+    } finally {
+        if (-not $committed) { RestoreEditor $root $session ([EmploidleDesktop]::InputTick() -ne [uint32]$request.input_tick) }
+    }
 }

@@ -1,5 +1,39 @@
 use rand::Rng;
 
+pub fn next_target<T: Clone + Eq>(
+    remaining: &mut Vec<T>,
+    available: &[T],
+    current: Option<&T>,
+    rng: &mut impl Rng,
+) -> Option<T> {
+    remaining.retain(|target| available.contains(target));
+    if remaining.is_empty() {
+        remaining.extend_from_slice(available);
+    }
+    let mut choices: Vec<_> = remaining
+        .iter()
+        .filter(|target| Some(*target) != current)
+        .cloned()
+        .collect();
+    if choices.is_empty() && available.len() > 1 {
+        remaining.clear();
+        remaining.extend_from_slice(available);
+        choices = remaining
+            .iter()
+            .filter(|target| Some(*target) != current)
+            .cloned()
+            .collect();
+    }
+    if choices.is_empty() {
+        choices.clone_from(remaining);
+    }
+    let target = choices
+        .get(rng.random_range(0..choices.len().max(1)))?
+        .clone();
+    remaining.retain(|item| *item != target);
+    Some(target)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scenario {
     Reading,
