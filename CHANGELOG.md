@@ -2,6 +2,20 @@
 
 All notable changes are documented here. The format follows [Conventional Commits](https://www.conventionalcommits.org/) and the version scheme is [Semantic Versioning](https://semver.org/).
 
+## [1.0.5](https://github.com/khasky/emploidle/compare/v1.0.4...v1.0.5) (2026-11-01)
+
+
+### Bug Fixes
+
+* **activity:** review and scroll VS Code project files ([f372130](https://github.com/khasky/emploidle/commit/f372130ffedff6e893cd6baeb6deeef00b633861))
+
+VS Code activity now expands Explorer folders and visits different unopened text files in each scenario. It scrolls inside the tabs it creates and closes them afterward, restoring existing tabs, previews, editor group selections and folder expansion states. The editor must already be running; ambiguous accessibility controls are skipped.
+
+### Known limitations
+
+* The complete native VS Code integration check remains unverified: its last run stopped because the test window could not be focused.
+* During an in-page address change, a browser scroll command already sent through Windows UI Automation may finish after the transition. Preserving the new page's scroll position and read state is not guaranteed for this case.
+
 ## [1.0.4](https://github.com/khasky/emploidle/compare/v1.0.3...v1.0.4) (2026-11-01)
 
 
