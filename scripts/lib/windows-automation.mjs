@@ -140,12 +140,36 @@ $bounds = $root.Current.BoundingRectangle
     ],
     { windowsHide: true },
   );
+  nativeMouse(handle, session.file.bounds, { button: "move" });
   const target = automationRequest(handle, {
     operation: "editor_file_target",
     session,
   });
   if (!target.ok) throw new Error(target.error);
-  const { x, y, width, height } = target.data;
+  nativeMouse(handle, target.data);
+  return automationRequest(
+    handle,
+    { operation: "capture_editor", session },
+    acknowledge,
+  );
+}
+
+export function scrollEditorFile(handle, session, amount) {
+  const target = automationRequest(handle, {
+    operation: "editor_viewport",
+    session,
+  });
+  if (!target.ok) throw new Error(target.error);
+  nativeMouse(handle, target.data, { amount });
+  return target.data;
+}
+
+export function clickEditorPoint(handle, point) {
+  nativeMouse(handle, { ...point, width: 0, height: 0 }, { button: "left" });
+}
+
+function nativeMouse(handle, target, { amount = 0, button = "middle" } = {}) {
+  const { x, y, width, height } = target;
   execFileSync(
     "powershell.exe",
     [
@@ -156,32 +180,29 @@ $bounds = $root.Current.BoundingRectangle
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-public static class OwnedFileClick {
+public static class OwnedEditorMouse {
  [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
  [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
  [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
  [DllImport("user32.dll")] static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
- public static void Click(IntPtr window, int x, int y) {
+ public static void Send(IntPtr window, int x, int y, int amount, uint down, uint up) {
   SetThreadDpiAwarenessContext(new IntPtr(-4));
   if(GetForegroundWindow()!=window) throw new Exception("The owned editor lost focus");
   for(int key=1;key<256;key++) if(GetAsyncKeyState(key)<0) throw new Exception("Input interrupted the owned file click");
   uint nx=(uint)Math.Round((x-GetSystemMetrics(76))*65535.0/(GetSystemMetrics(78)-1));
   uint ny=(uint)Math.Round((y-GetSystemMetrics(77))*65535.0/(GetSystemMetrics(79)-1));
   var marker=new UIntPtr(0x454d504c);
-  mouse_event(0xc001,nx,ny,0,marker);mouse_event(0x20,0,0,0,marker);mouse_event(0x40,0,0,0,marker);
+  mouse_event(0xc001,nx,ny,0,marker);
+  if(amount==0 && down!=0) {mouse_event(down,0,0,0,marker);mouse_event(up,0,0,0,marker);}
+  else if(amount!=0) mouse_event(0x800,0,0,unchecked((uint)(-120*amount)),marker);
  }
 }
 '@
-[OwnedFileClick]::Click([IntPtr]${handle.window}, ${Math.round(x + width / 2)}, ${Math.round(y + height / 2)})
+[OwnedEditorMouse]::Send([IntPtr]${handle.window}, ${Math.round(x + width / 2)}, ${Math.round(y + height / 2)}, ${amount}, ${button === "move" ? 0 : button === "left" ? 2 : 0x20}, ${button === "move" ? 0 : button === "left" ? 4 : 0x40})
 `,
     ],
     { encoding: "utf8", windowsHide: true },
-  );
-  return automationRequest(
-    handle,
-    { operation: "capture_editor", session },
-    acknowledge,
   );
 }
 

@@ -123,17 +123,19 @@ pub struct EditorSession {
     original_view: Vec<i32>,
     target_view: Vec<i32>,
     original_focus: Option<Vec<i32>>,
-    original_editor: Option<Vec<i32>>,
     created_editor: Option<Vec<i32>>,
     tree_selection: Vec<Vec<i32>>,
+    tree_captured: bool,
+    expanded_folders: Vec<Vec<i32>>,
     original_editors: Vec<Vec<i32>>,
+    selected_editors: Vec<Vec<i32>>,
     pub file: Option<EditorFile>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EditorFile {
     element: Vec<i32>,
-    name: String,
+    pub name: String,
     pub bounds: Bounds,
 }
 
@@ -169,18 +171,35 @@ pub fn capture_editor_review(
     }
 }
 
+pub fn editor_viewport(
+    window: u64,
+    process_id: u32,
+    session: EditorSession,
+) -> Result<Bounds, String> {
+    #[cfg(target_os = "windows")]
+    {
+        accessibility::editor_viewport(window, process_id, session)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, process_id, session);
+        Err("Native editor viewports are unavailable".into())
+    }
+}
+
 pub fn begin_editor_review(
     window: u64,
     process_id: u32,
     action: u32,
+    exclude_files: &[String],
 ) -> Result<Option<EditorSession>, String> {
     #[cfg(target_os = "windows")]
     {
-        accessibility::begin_editor(window, process_id, action)
+        accessibility::begin_editor(window, process_id, action, exclude_files)
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (window, process_id, action);
+        let _ = (window, process_id, action, exclude_files);
         Ok(None)
     }
 }

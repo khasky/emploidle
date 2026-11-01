@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use enigo::{Button, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
+use enigo::{Axis, Button, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
 use rand::Rng;
 use tauri::{AppHandle, Emitter};
 
@@ -444,17 +444,20 @@ fn review_editor(
     source: &desktop::WindowInfo,
     rng: &mut impl Rng,
     action: u32,
-) -> StepResult {
+    exclude_files: &[String],
+) -> Result<Option<String>, StepError> {
     guard.check()?;
     let Some(mut session) = desktop::begin_editor_review(
         source.id,
         source.process_id,
         action + 3 * rng.random_range(0..100_000),
+        exclude_files,
     )
     .map_err(StepError::RestorationFailed)?
     else {
-        return Ok(());
+        return Ok(None);
     };
+    let reviewed_file = session.file.as_ref().map(|file| file.name.clone());
     let result = (|| {
         if let Some(file) = &session.file {
             let bounds = file.bounds;
@@ -487,6 +490,29 @@ fn review_editor(
             session = desktop::capture_editor_review(source.id, source.process_id, session.clone())
                 .map_err(StepError::RestorationFailed)?;
             guard.check()?;
+            let viewport = desktop::editor_viewport(source.id, source.process_id, session.clone())
+                .map_err(StepError::Failed)?;
+            smooth_point(
+                e,
+                guard,
+                (
+                    viewport.x + viewport.width / 2,
+                    viewport.y + viewport.height / 2,
+                ),
+                rng,
+            )?;
+            for _ in 0..rng.random_range(5..=10) {
+                let fresh = desktop::editor_viewport(source.id, source.process_id, session.clone())
+                    .map_err(StepError::Failed)?;
+                if (fresh.x, fresh.y, fresh.width, fresh.height)
+                    != (viewport.x, viewport.y, viewport.width, viewport.height)
+                {
+                    return Err(StepError::Interrupted);
+                }
+                guard.input(|| e.scroll(1, Axis::Vertical))?;
+                guard.wait(Duration::from_millis(rng.random_range(100..=220)))?;
+            }
+            guard.check()?;
         }
         guard.wait(Duration::from_millis(rng.random_range(300..=650)))?;
         if action != 2 {
@@ -505,7 +531,7 @@ fn review_editor(
     let restored =
         desktop::restore_editor_review(source.id, source.process_id, session, interrupted)
             .map_err(StepError::RestorationFailed);
-    restored.and(result)
+    restored.and(result).map(|()| reviewed_file)
 }
 
 fn review_editor_sequence(
@@ -513,16 +539,38 @@ fn review_editor_sequence(
     guard: &Guard<'_>,
     source: &desktop::WindowInfo,
     rng: &mut impl Rng,
+    app: &AppHandle,
 ) -> StepResult {
-    review_editor(e, guard, source, rng, 0)?;
+    guard
+        .controller
+        .report(app, "VS Code: reviewing Extensions");
+    review_editor(e, guard, source, rng, 0, &[])?;
     guard.check()?;
-    let explorer = desktop::begin_editor_review(source.id, source.process_id, 1)
+    guard.controller.report(app, "VS Code: reviewing Explorer");
+    let explorer = desktop::begin_editor_review(source.id, source.process_id, 1, &[])
         .map_err(StepError::RestorationFailed)?;
     let result = (|| {
         guard.wait(Duration::from_millis(rng.random_range(450..=850)))?;
         desktop::review_tree(source.id, source.process_id, rng.random())
             .map_err(StepError::RestorationFailed)?;
-        review_editor(e, guard, source, rng, 2)
+        let mut reviewed = Vec::new();
+        for _ in 0..rng.random_range(2..=4) {
+            guard.check()?;
+            guard
+                .controller
+                .report(app, "VS Code: opening and scrolling another project file");
+            let Some(file) = review_editor(e, guard, source, rng, 2, &reviewed)? else {
+                if reviewed.is_empty() {
+                    guard.controller.report(
+                        app,
+                        "VS Code: no safely restorable unopened text file is exposed by Explorer",
+                    );
+                }
+                break;
+            };
+            reviewed.push(file);
+        }
+        Ok(())
     })();
     let restored = if let Some(session) = explorer {
         desktop::restore_editor_review(
@@ -771,7 +819,7 @@ pub fn spawn_worker(controller: Arc<Controller>, app: AppHandle) {
                 let e = enigo.as_mut().unwrap();
                 if SourceKind::detect(None, &source.application) == SourceKind::Ide {
                     controller.report(&app, "IDE: extensions, project tree and a project file");
-                    review_editor_sequence(e, &guard, &source, &mut rng)?;
+                    review_editor_sequence(e, &guard, &source, &mut rng, &app)?;
                     return Ok(());
                 }
                 if let Some(snapshot) = &snapshot {

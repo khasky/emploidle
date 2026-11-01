@@ -49,11 +49,15 @@ enum Operation {
     },
     BeginEditor {
         action: u32,
+        exclude_files: Vec<String>,
     },
     EditorFileTarget {
         session: EditorSession,
     },
     CaptureEditor {
+        session: EditorSession,
+    },
+    EditorViewport {
         session: EditorSession,
     },
     RestoreEditor {
@@ -130,7 +134,10 @@ fn run_guarded<T: for<'de> Deserialize<'de>>(
     }
     let mutating = !matches!(
         request.operation,
-        Operation::Inspect | Operation::BrowserContext | Operation::BrowserTabs
+        Operation::Inspect
+            | Operation::BrowserContext
+            | Operation::BrowserTabs
+            | Operation::EditorViewport { .. }
     );
     let payload = serde_json::to_vec(&Envelope {
         request,
@@ -284,6 +291,7 @@ pub fn begin_editor(
     window: u64,
     process_id: u32,
     action: u32,
+    exclude_files: &[String],
 ) -> Result<Option<EditorSession>, String> {
     #[derive(Deserialize)]
     struct Review {
@@ -292,7 +300,10 @@ pub fn begin_editor(
     run::<Review>(Request {
         window,
         process_id,
-        operation: Operation::BeginEditor { action },
+        operation: Operation::BeginEditor {
+            action,
+            exclude_files: exclude_files.to_vec(),
+        },
     })
     .map(|review| review.session)
 }
@@ -335,6 +346,18 @@ pub fn capture_editor(
         window,
         process_id,
         operation: Operation::CaptureEditor { session },
+    })
+}
+
+pub fn editor_viewport(
+    window: u64,
+    process_id: u32,
+    session: EditorSession,
+) -> Result<Bounds, String> {
+    run(Request {
+        window,
+        process_id,
+        operation: Operation::EditorViewport { session },
     })
 }
 

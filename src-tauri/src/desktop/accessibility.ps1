@@ -140,6 +140,27 @@ try {
 using System;
 using System.Runtime.InteropServices;
 public static class EmploidleDesktop {
+    [StructLayout(LayoutKind.Sequential)] private struct Point { public int X; public int Y; }
+    [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr window, uint flags);
+    [DllImport("user32.dll")] private static extern bool ScreenToClient(IntPtr window, ref Point point);
+    [DllImport("user32.dll")] private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr flags, IntPtr position, uint options, uint timeout, out UIntPtr result);
+    public static void ClickClient(IntPtr root, int x, int y, uint tick) {
+        var point = new Point { X = x, Y = y };
+        var window = WindowFromPoint(point);
+        if (GetForegroundWindow() != root || GetAncestor(window, 2) != root || InputTick() != tick)
+            throw new Exception("The Explorer action was interrupted");
+        if (!ScreenToClient(window, ref point)) throw new Exception("The Explorer client coordinates are unavailable");
+        var position = new IntPtr(unchecked((point.Y << 16) | (point.X & 0xffff)));
+        UIntPtr result;
+        try {
+            if (SendMessageTimeout(window, 0x201, new UIntPtr(1), position, 2, 100, out result) == IntPtr.Zero)
+                throw new Exception("The Explorer click was not accepted");
+        } finally {
+            if (SendMessageTimeout(window, 0x202, UIntPtr.Zero, position, 2, 100, out result) == IntPtr.Zero)
+                throw new Exception("The Explorer click did not finish");
+        }
+    }
     [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
     public static System.Threading.Tasks.Task<string> ReadCancellation() {
@@ -172,6 +193,7 @@ public static class EmploidleDesktop {
     if ($request.operation -eq 'begin_editor') { BeginEditor $root ([uint32]$request.action); exit }
     if ($request.operation -eq 'editor_file_target') { Respond (EditorFileTarget $root $request.session); exit }
     if ($request.operation -eq 'capture_editor') { CaptureEditor $root $request.session; exit }
+    if ($request.operation -eq 'editor_viewport') { Respond (EditorViewport $root $request.session); exit }
     if ($request.operation -eq 'restore_editor') { RestoreEditor $root $request.session ([bool]$request.interrupted); Respond $true; exit }
     if ($request.operation -in @('browser_context', 'open_tab', 'close_tab')) {
         if ($request.operation -eq 'close_tab') {
