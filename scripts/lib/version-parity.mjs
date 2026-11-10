@@ -1,17 +1,10 @@
 import cargoLock from "../cargo-lock-updater.cjs";
 import cargoToml from "../cargo-toml-updater.cjs";
 
-export function versionErrors({
-  packageVersion,
-  tauriVersion,
-  manifest,
-  lock,
-  tag,
-}) {
+export function versionErrors({ packageVersion, manifest, lock, tag }) {
   const versions = {
-    "src-tauri/tauri.conf.json": tauriVersion,
-    "src-tauri/Cargo.toml": cargoToml.readVersion(manifest),
-    "src-tauri/Cargo.lock": cargoLock.readVersion(lock),
+    "Cargo.toml": cargoToml.readVersion(manifest),
+    "Cargo.lock": cargoLock.readVersion(lock),
   };
   const errors = [];
   if (

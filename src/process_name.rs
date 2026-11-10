@@ -55,7 +55,12 @@ pub fn executable_path() -> io::Result<std::path::PathBuf> {
     if let Some(path) = EXECUTABLE_PATH.get() {
         return Ok(path.clone());
     }
-    tauri::process::current_binary(&tauri::Env::default())
+    // An AppImage runs from a temporary mount; startup entries need the image itself.
+    #[cfg(target_os = "linux")]
+    if let Some(image) = std::env::var_os("APPIMAGE") {
+        return Ok(image.into());
+    }
+    std::env::current_exe()
 }
 
 #[cfg(target_os = "windows")]
@@ -176,7 +181,7 @@ fn clear_display_metadata(path: &std::path::Path) -> io::Result<()> {
 
     let mut languages = Vec::<u16>::new();
     let wide_path: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-    // Tauri emits VERSIONINFO as resource 1. Task Manager prefers its FileDescription.
+    // The build script emits VERSIONINFO as resource 1. Task Manager prefers its FileDescription.
     unsafe {
         let module = GetModuleHandleW(ptr::null());
         if module.is_null() {

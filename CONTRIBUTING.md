@@ -41,7 +41,7 @@ revert(ui): restore the previous tray controls
 Refs: 79a8186
 ```
 
-`pnpm release` uses `commit-and-tag-version` to derive the next version from the commits since the last tag: breaking changes bump major, features bump minor, and other changes bump patch. It synchronizes `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock`, writes the changelog, creates the release commit and tags it. `feat`, `fix`, `perf`, `refactor` and `revert` appear in the changelog; other types are hidden. See [the release guide](docs/releasing.md).
+`pnpm release` uses `commit-and-tag-version` to derive the next version from the commits since the last tag: breaking changes bump major, features bump minor, and other changes bump patch. It synchronizes `package.json`, `Cargo.toml` and `Cargo.lock`, writes the changelog, creates the release commit and tags it. `feat`, `fix`, `perf`, `refactor` and `revert` appear in the changelog; other types are hidden. See [the release guide](docs/releasing.md).
 
 ## Checks
 
@@ -50,8 +50,8 @@ pnpm check:versions
 pnpm lint
 pnpm lint:workflow
 pnpm test
-cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-cargo test --locked --manifest-path src-tauri/Cargo.toml
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
 ```
 
-On Windows, build a debug executable with `pnpm tauri build --debug --no-bundle --ci -- --locked`, then run `pnpm test:windows` to check the actual process, window title, metadata and WebView2 browser. JavaScript tooling uses Vitest; Rust tests remain in Cargo.
+On Windows, build a debug executable with `cargo build --locked`, then run `pnpm test:windows` to check the actual process, window title and metadata. JavaScript tooling uses Vitest; Rust tests remain in Cargo.

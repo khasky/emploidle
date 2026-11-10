@@ -6,7 +6,7 @@ const bootstrap =
   "[Console]::InputEncoding = [Text.UTF8Encoding]::new($false); & ([scriptblock]::Create(([Console]::In.ReadLine() | ConvertFrom-Json)))";
 const scriptSource = () =>
   ["vscode.ps1", "browser.ps1", "accessibility.ps1"]
-    .map((name) => readFileSync(`src-tauri/src/desktop/${name}`, "utf8"))
+    .map((name) => readFileSync(`src/desktop/${name}`, "utf8"))
     .join("\n");
 
 export const inputTick = () =>

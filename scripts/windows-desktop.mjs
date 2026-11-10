@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import {
@@ -10,7 +12,6 @@ import {
   inputTick,
   readPageRequest,
 } from "./lib/windows-automation.mjs";
-import mockTauri from "./screenshots/tauri-mock.mjs";
 
 assert.equal(process.platform, "win32", "Desktop integration requires Windows");
 const browser = await chromium.launch({
@@ -21,10 +22,14 @@ try {
   const context = await browser.newContext({
     viewport: { width: 440, height: 420 },
   });
-  await context.addInitScript(mockTauri, { version: "1.0.1" });
   const page = await context.newPage();
-  await page.goto(pathToFileURL(resolve("src/index.html")).href);
-  await page.waitForFunction(() => !document.getElementById("toggle").disabled);
+  // A local page taller than the viewport gives the browser something to scroll.
+  const fixturePath = join(tmpdir(), `emploidle-desktop-${process.pid}.html`);
+  writeFileSync(
+    fixturePath,
+    `<!doctype html><title>Fixture</title>${"<p>Review the draft and collect ideas for the next iteration.</p>".repeat(60)}`,
+  );
+  await page.goto(pathToFileURL(fixturePath).href);
   const title = `Emploidle desktop verification ${process.pid}`;
   await page.evaluate((title) => {
     document.title = title;

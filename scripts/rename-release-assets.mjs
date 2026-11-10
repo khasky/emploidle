@@ -54,7 +54,7 @@ for (const asset of renames) {
   );
   console.log(`${asset.name} -> ${name}`);
 }
-const directory = "src-tauri/target/release-assets";
+const directory = "target/release-assets";
 mkdirSync(directory, { recursive: true });
 const filename = `${directory}/latest.json`;
 writeFileSync(filename, `${JSON.stringify(manifest, null, 2)}\n`);

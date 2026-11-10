@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="src-tauri/icons/128x128@2x.png" width="104" height="104" alt="Emploidle: a desktop window with a mouse pointer">
+<img src="icons/128x128@2x.png" width="104" height="104" alt="Emploidle: a desktop window with a mouse pointer">
 
 # Emploidle
 
@@ -18,7 +18,7 @@ A desktop anti-idle activity simulator with automatic window discovery, varied c
 
 <p><sub>Application interface with demonstration data. Screenshots follow your light or dark theme.</sub></p>
 
-<sub>Built with <b>Tauri 2</b> · <b>Rust</b> · <b>HTML, CSS &amp; JavaScript</b></sub>
+<sub>Built with <b>Rust</b> · <b>GPUI</b></sub>
 
 </div>
 
@@ -30,6 +30,7 @@ A desktop anti-idle activity simulator with automatic window discovery, varied c
 - **Pauses for your input.** Physical keyboard or mouse activity interrupts the simulation. It resumes after 8 seconds without physical input; a global shortcut stops it immediately.
 - **Weekly schedule.** Choose days of the week and start and finish times, including overnight shifts, and optionally launch Emploidle at login.
 - **Tray controls and updates.** Start, stop or reopen the window from the tray. Builds with updater support offer signed updates with download progress and a restart button.
+- **Light, dark or system theme.** Switch the theme at the bottom of the window; the choice is saved with your preferences.
 
 <details>
 <summary><b>More screenshots: schedule, paused activity and updates</b></summary>
@@ -66,10 +67,10 @@ Download an installer from [GitHub Releases](https://github.com/khasky/emploidle
 
 | Platform | Package | Installation |
 | --- | --- | --- |
-| Windows x64 | `-win-x64-setup.exe` or `-win-x64.msi` | Run the installer. |
+| Windows x64 | `-win-x64-setup.exe` | Run the installer. |
 | macOS Apple Silicon | `-mac-arm64.dmg` | Open the disk image and drag Emploidle to Applications. |
 | macOS Intel | `-mac-x64.dmg` | Open the disk image and drag Emploidle to Applications. |
-| Linux x64, X11 | `-linux-x64.AppImage`, `.deb` or `.rpm` | Make the AppImage executable and launch it, or install the package for your distribution. |
+| Linux x64, X11 | `-linux-x64.AppImage` or `.deb` | Make the AppImage executable and launch it, or install the package for your distribution. |
 
 Filenames begin with `Emploidle-<version>`. See [Platform notes](#platform-notes) for permissions and session requirements.
 
@@ -140,7 +141,7 @@ Restorable scrolling, browser tabs and IDE tree actions currently require Window
 
 ## Development
 
-Requires the [Rust toolchain](https://rustup.rs), Node.js 22 or newer, and pnpm 9.15.4, pinned in [package.json](package.json). Install the [Tauri platform prerequisites](https://tauri.app/start/prerequisites/), including WebKitGTK on Linux.
+Requires the [Rust toolchain](https://rustup.rs), Node.js 22 or newer, and pnpm 9.15.4, pinned in [package.json](package.json). On Linux, install the X11, Wayland, xkbcommon, Vulkan and fontconfig development packages listed in the [build workflow](.github/workflows/build.yml). Packaging uses [cargo-packager](https://github.com/crabnebula-dev/cargo-packager): `cargo install cargo-packager --locked`.
 
 ```sh
 pnpm install
@@ -148,18 +149,17 @@ pnpm dev:desktop      # run
 pnpm build:desktop    # produce a bundled binary/installer
 ```
 
-The frontend is static files under `src/`. Node.js runs development and release tooling. Local builds do not require the updater signing key.
+The interface is written in Rust with [GPUI Kit](https://crates.io/crates/gpui-kit) in `src/ui.rs`. Node.js runs development and release tooling. Installers are written to `target/packager/`. Local builds do not require the updater signing key.
 
 ### README screenshots
 
-Regenerate the light and dark screenshots with Playwright:
+Regenerate the light and dark screenshots:
 
 ```sh
-pnpm exec playwright install chromium
 pnpm screenshots
 ```
 
-The capture script renders the same HTML, CSS and JavaScript as the desktop app at 2× resolution. A separate [Tauri mock](scripts/screenshots/tauri-mock.mjs) supplies demonstration data; capture does not read your open windows, change startup settings or run activity. Images are written to `screenshots/`. Main-window dimensions come from Tauri's config; schedule captures frame its controls, and paused/update captures show the corresponding main-window states.
+The ignored `screenshots` test in `src/ui.rs` opens the real GPUI window for each theme and state, renders it to an image at the display's scale and crops it. Demonstration data replaces your settings; capture does not read your open windows, change startup settings or run activity. Images are written to `screenshots/`; schedule captures frame its controls, and paused/update captures show the corresponding main-window states. Capture currently runs on Windows only and briefly shows windows at the top-left corner of the screen.
 
 ### Checks
 
@@ -168,14 +168,14 @@ pnpm check:versions
 pnpm lint
 pnpm lint:workflow
 pnpm test
-cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-cargo test --locked --manifest-path src-tauri/Cargo.toml
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
 ```
 
 Native Windows checks require an unlocked desktop without simultaneous keyboard or mouse input. After building the debug application, run:
 
 ```powershell
-pnpm build:desktop --debug --ci --no-bundle -- -- --locked
+cargo build --locked
 pnpm test:windows
 node scripts/windows-vscode.mjs
 ```
@@ -184,7 +184,7 @@ The VS Code check requires an installed editor. It uses a separate workspace, pr
 
 ### Versioning and releases
 
-Commit messages and pull request titles follow [Conventional Commits](CONTRIBUTING.md#commit-messages). `pnpm release` derives the next version and [CHANGELOG.md](CHANGELOG.md) from commits, synchronizing `package.json`, Tauri's config and both Cargo files through [.versionrc.json](.versionrc.json).
+Commit messages and pull request titles follow [Conventional Commits](CONTRIBUTING.md#commit-messages). `pnpm release` derives the next version and [CHANGELOG.md](CHANGELOG.md) from commits, synchronizing `package.json`, `Cargo.toml` and `Cargo.lock` through [.versionrc.json](.versionrc.json).
 
 Run `pnpm check:versions` to check version parity, or `pnpm release --dry-run` to preview a release. A pushed `v<version>` tag builds installers for Windows, Linux and macOS and prepares a draft GitHub Release. Follow the [release guide](docs/releasing.md) for signing, updater artifacts and publishing.
 
@@ -204,7 +204,7 @@ Existing HTTP and HTTPS tabs are identified through native accessibility control
 
 Each launch generates a random 15-character process name, also used for the window title and tray tooltip. The text inside the window keeps the Emploidle name. If setting the random name fails, the application exits before starting its activity worker or window.
 
-- **Windows:** the launcher briefly runs as `emploidle.exe`, starts a copy with a random `.exe` filename in the temporary directory's `emploidle-processes` folder, then exits. The copy omits the version resource so Task Manager uses its random filename; the original executable retains its metadata. Arguments and the working directory are preserved. Unlocked copies from earlier runs are removed on the next launch; the final copy remains until a later launch or temporary-file cleanup. Both debug and release builds run without a console window. WebView2 browser, renderer and utility processes appear under the application in Task Manager.
+- **Windows:** the launcher briefly runs as `emploidle.exe`, starts a copy with a random `.exe` filename in the temporary directory's `emploidle-processes` folder, then exits. The copy omits the version resource so Task Manager uses its random filename; the original executable retains its metadata. Arguments and the working directory are preserved. Unlocked copies from earlier runs are removed on the next launch; the final copy remains until a later launch or temporary-file cleanup. Both debug and release builds run without a console window.
 - **Linux:** changes the kernel process name through `/proc/self/comm`, visible in tools such as `ps -o comm`. The executable path and command line retain their original names.
 - **macOS:** changes the kernel process name through `kern.procname`, preserving the application bundle and its signature. Views based on bundle metadata or command-line arguments may still show Emploidle.
 

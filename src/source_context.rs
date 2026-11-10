@@ -44,7 +44,7 @@ impl SourceKind {
         )
     }
 
-    pub fn browser_address(value: &str) -> Option<tauri::Url> {
+    pub fn browser_address(value: &str) -> Option<url::Url> {
         if value.len() > 512 {
             return None;
         }
@@ -53,12 +53,12 @@ impl SourceKind {
         } else {
             format!("https://{value}")
         };
-        let url = tauri::Url::parse(&value).ok()?;
+        let url = url::Url::parse(&value).ok()?;
         (url.scheme() == "https" && url.username().is_empty() && url.password().is_none())
             .then_some(url)
     }
 
-    pub fn allows_link(self, current: &tauri::Url, candidate: &tauri::Url, visited: bool) -> bool {
+    pub fn allows_link(self, current: &url::Url, candidate: &url::Url, visited: bool) -> bool {
         if !visited
             || !self.can_browse()
             || candidate.scheme() != "https"
@@ -72,7 +72,7 @@ impl SourceKind {
         self.allows_page(candidate)
     }
 
-    pub fn allows_page(self, address: &tauri::Url) -> bool {
+    pub fn allows_page(self, address: &url::Url) -> bool {
         if address.scheme() != "https"
             || address.query().is_some()
             || !address.username().is_empty()
@@ -193,7 +193,7 @@ impl SourceKind {
     }
 
     pub fn allows_reading(address: &str) -> bool {
-        let Ok(url) = tauri::Url::parse(address) else {
+        let Ok(url) = url::Url::parse(address) else {
             return false;
         };
         if !matches!(url.scheme(), "http" | "https")
@@ -285,7 +285,7 @@ mod tests {
     fn browsing_reuses_https_and_only_visits_known_read_only_links() {
         let base = SourceKind::browser_address("github.com/team/project").unwrap();
         let file =
-            tauri::Url::parse("https://github.com/team/project/blob/main/src/main.rs").unwrap();
+            url::Url::parse("https://github.com/team/project/blob/main/src/main.rs").unwrap();
         assert!(SourceKind::Repository.allows_link(&base, &file, true));
         assert!(!SourceKind::Repository.allows_link(&base, &file, false));
         for address in [
@@ -296,7 +296,7 @@ mod tests {
         ] {
             assert!(!SourceKind::Repository.allows_link(
                 &base,
-                &tauri::Url::parse(address).unwrap(),
+                &url::Url::parse(address).unwrap(),
                 true
             ));
         }
@@ -308,7 +308,7 @@ mod tests {
             assert!(SourceKind::browser_address(address).is_none());
         }
         let gitlab =
-            tauri::Url::parse("https://gitlab.com/team/project/-/blob/main/src/main.rs").unwrap();
+            url::Url::parse("https://gitlab.com/team/project/-/blob/main/src/main.rs").unwrap();
         assert!(SourceKind::Repository.allows_link(&gitlab, &gitlab, true));
         for address in [
             "https://github.com/notifications",
@@ -316,10 +316,10 @@ mod tests {
             "https://workspace.notion.so/inbox",
             "https://team.atlassian.net/settings",
         ] {
-            let address = tauri::Url::parse(address).unwrap();
+            let address = url::Url::parse(address).unwrap();
             assert!(!SourceKind::detect(address.host_str(), "chrome.exe").allows_page(&address));
         }
-        let jira = tauri::Url::parse("https://team.atlassian.net/browse/APP-10").unwrap();
+        let jira = url::Url::parse("https://team.atlassian.net/browse/APP-10").unwrap();
         assert!(SourceKind::Jira.allows_link(&jira, &jira, true));
         assert!(!SourceKind::Mail.allows_link(&jira, &jira, true));
         assert!(!SourceKind::Chat.allows_link(&jira, &jira, true));
@@ -349,7 +349,7 @@ mod tests {
         );
         assert!(!SourceKind::Browser.can_browse());
         assert!(!SourceKind::Browser
-            .allows_page(&tauri::Url::parse("https://evilgithub.com/team/project").unwrap()));
+            .allows_page(&url::Url::parse("https://evilgithub.com/team/project").unwrap()));
     }
 
     #[test]

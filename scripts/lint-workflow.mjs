@@ -26,7 +26,7 @@ const target = `${process.platform}-${process.arch}`;
 if (!targets[target])
   throw new Error(`Unsupported actionlint platform: ${target}`);
 const [suffix, checksum] = targets[target];
-const directory = join("src-tauri", "target", "actionlint", version, target);
+const directory = join("target", "actionlint", version, target);
 const executable = join(
   directory,
   process.platform === "win32" ? "actionlint.exe" : "actionlint",

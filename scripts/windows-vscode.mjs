@@ -20,9 +20,7 @@ assert.ok(
   executable,
   "VS Code must be installed for the native editor integration check",
 );
-const directory = resolve(
-  `src-tauri/target/vscode-verification-${process.pid}`,
-);
+const directory = resolve(`target/vscode-verification-${process.pid}`);
 const workspace = join(directory, "workspace");
 for (const path of ["workspace/lib", "profile/User", "extensions", "shared"])
   mkdirSync(join(directory, path), { recursive: true });

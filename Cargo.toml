@@ -1,0 +1,59 @@
+[package]
+name = "emploidle"
+version = "1.0.5"
+description = "Anti-idle activity simulator with a tray icon"
+authors = ["https://github.com/khasky"]
+license = "MIT"
+edition = "2021"
+
+[lib]
+name = "emploidle_lib"
+
+[dependencies]
+gpui-kit = { version = "0.9.1", default-features = false }
+chrono = { version = "0.4", default-features = false }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+enigo = "0.6"
+rand = "0.9"
+url = "2"
+semver = "1"
+base64 = "0.22"
+minisign-verify = "0.3"
+ureq = { version = "3", features = ["json"] }
+dirs = "6"
+png = "0.18"
+
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+tray-icon = "0.26"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "0.3", features = ["blocking"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+flate2 = "1"
+tar = "0.4"
+
+# Screenshot capture renders real windows; these are the GPUI crates gpui-kit wraps.
+[dev-dependencies]
+gpui-pre = { version = "=0.3.12", features = ["test-support"] }
+gpui-pre-platform = { version = "=0.3.12", features = ["test-support"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winresource = "0.1"
+
+# `cargo packager --release` packages an existing release build.
+[package.metadata.packager]
+product-name = "Emploidle"
+identifier = "com.khasky.emploidle"
+publisher = "Khasky"
+copyright = "Copyright (c) 2026 Khasky"
+homepage = "https://github.com/khasky/emploidle"
+license-file = "LICENSE"
+category = "Utility"
+out-dir = "target/packager"
+binaries = [{ path = "emploidle", main = true }]
+icons = ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+formats = ["nsis", "app", "dmg", "appimage", "deb"]

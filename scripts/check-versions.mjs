@@ -5,9 +5,8 @@ const read = (file) => readFileSync(file, "utf8");
 const packageVersion = JSON.parse(read("package.json")).version;
 const errors = versionErrors({
   packageVersion,
-  tauriVersion: JSON.parse(read("src-tauri/tauri.conf.json")).version,
-  manifest: read("src-tauri/Cargo.toml"),
-  lock: read("src-tauri/Cargo.lock"),
+  manifest: read("Cargo.toml"),
+  lock: read("Cargo.lock"),
   tag: process.env.RELEASE_TAG,
 });
 if (errors.length) {

@@ -9,7 +9,7 @@ assert.equal(
   "win32",
   "This integration check requires Windows",
 );
-const executable = resolve("src-tauri/target/debug/emploidle.exe");
+const executable = resolve("target/debug/emploidle.exe");
 const image = readFileSync(executable);
 assert.equal(
   image.readUInt16LE(image.readUInt32LE(0x3c) + 24 + 68),
@@ -38,8 +38,7 @@ for (let run = 0; run < 2; run++) {
         if ($children.Count -eq 0) { 'null'; exit }
         $app = Get-Process -Id $children[0].ProcessId
         $metadata = [Diagnostics.FileVersionInfo]::GetVersionInfo($app.Path)
-        $browsers = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($app.Id)" | Where-Object { $_.Name -eq 'msedgewebview2.exe' })
-        [pscustomobject]@{ id=$app.Id; name=$app.ProcessName; title=$app.MainWindowTitle; window=$app.MainWindowHandle.ToInt64(); description=$metadata.FileDescription; product=$metadata.ProductName; browsers=$browsers.Count } | ConvertTo-Json -Compress
+        [pscustomobject]@{ id=$app.Id; name=$app.ProcessName; title=$app.MainWindowTitle; window=$app.MainWindowHandle.ToInt64(); description=$metadata.FileDescription; product=$metadata.ProductName} | ConvertTo-Json -Compress
       `;
       application = JSON.parse(
         execFileSync(
@@ -54,13 +53,12 @@ for (let run = 0; run < 2; run++) {
           application.name,
           "Window exposes a fixed title",
         );
-        if (application.browsers === 1) break;
+        break;
       }
       await delay(200);
     }
     assert.ok(application?.window, "Application window did not open");
     assert.equal(await exited, 0, "Launcher failed");
-    assert.equal(application.browsers, 1, "Expected one WebView2 browser");
     assert.ok(
       !application.description && !application.product,
       "Task Manager receives fixed metadata",
@@ -68,7 +66,7 @@ for (let run = 0; run < 2; run++) {
     assert.ok(!names.has(application.name), "Process name repeated");
     names.add(application.name);
     console.log(
-      `PASS: ${application.name}.exe; random window title; GUI subsystem; no fixed description; one WebView2 browser`,
+      `PASS: ${application.name}.exe; random window title; GUI subsystem; no fixed description`,
     );
   } finally {
     if (application?.id) process.kill(application.id);

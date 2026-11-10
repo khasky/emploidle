@@ -11,10 +11,21 @@ pub struct Preferences {
     pub autostart: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    Light,
+    Dark,
+    #[default]
+    System,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Settings {
     #[serde(default)]
     pub preferences: Preferences,
+    #[serde(default)]
+    pub theme: Theme,
 }
 
 pub struct SettingsState {
@@ -64,6 +75,24 @@ mod tests {
         let saved = serde_json::to_value(settings).unwrap();
         assert!(saved.get("targets").is_none());
         assert!(saved.get("practice").is_none());
+    }
+
+    #[test]
+    fn theme_defaults_to_system_and_round_trips() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.theme, Theme::System);
+        for theme in [Theme::Light, Theme::Dark, Theme::System] {
+            let saved = serde_json::to_string(&Settings {
+                theme,
+                ..Settings::default()
+            })
+            .unwrap();
+            assert_eq!(
+                serde_json::from_str::<Settings>(&saved).unwrap().theme,
+                theme
+            );
+        }
+        assert!(serde_json::from_str::<Settings>(r#"{"theme":"sepia"}"#).is_err());
     }
 
     #[test]

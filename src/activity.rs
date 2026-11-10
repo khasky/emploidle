@@ -4,9 +4,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::notifier::Notifier;
 use enigo::{Axis, Button, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
 use rand::Rng;
-use tauri::{AppHandle, Emitter};
 
 use crate::activity_plan::{self, Action, Plan};
 use crate::desktop::{self, Bounds};
@@ -48,15 +48,15 @@ impl Controller {
         self.status.lock().unwrap().clone()
     }
 
-    pub fn report(&self, app: &AppHandle, message: &str) {
+    pub fn report(&self, app: &Notifier, message: &str) {
         let mut status = self.status.lock().unwrap();
         if *status != message {
             *status = message.into();
-            let _ = app.emit("activity-status", message);
+            app.status(message);
         }
     }
 
-    pub fn stop(&self, app: &AppHandle) {
+    pub fn stop(&self, app: &Notifier) {
         let _intent = self.intent_lock.lock().unwrap();
         self.stopped_by_user.store(true, Ordering::SeqCst);
         self.intent_epoch.fetch_add(1, Ordering::SeqCst);
@@ -66,7 +66,7 @@ impl Controller {
         self.stop_activity(app);
     }
 
-    pub fn stop_for_schedule(&self, app: &AppHandle, expected_intent: u64) {
+    pub fn stop_for_schedule(&self, app: &Notifier, expected_intent: u64) {
         let _intent = self.intent_lock.lock().unwrap();
         if self.intent_epoch.load(Ordering::SeqCst) == expected_intent {
             self.stopped_by_user.store(false, Ordering::SeqCst);
@@ -74,7 +74,7 @@ impl Controller {
         }
     }
 
-    pub fn fail_scheduled(&self, app: &AppHandle, expected_intent: u64, error: &str) {
+    pub fn fail_scheduled(&self, app: &Notifier, expected_intent: u64, error: &str) {
         let _intent = self.intent_lock.lock().unwrap();
         if self.intent_epoch.load(Ordering::SeqCst) != expected_intent {
             return;
@@ -94,7 +94,7 @@ impl Controller {
         )
     }
 
-    fn fail_current(&self, app: &AppHandle, epoch: u64, error: &str) {
+    fn fail_current(&self, app: &Notifier, epoch: u64, error: &str) {
         let _intent = self.intent_lock.lock().unwrap();
         if !self.session_valid(epoch) {
             return;
@@ -107,10 +107,10 @@ impl Controller {
         self.report(app, error);
     }
 
-    fn stop_activity(&self, app: &AppHandle) {
+    fn stop_activity(&self, app: &Notifier) {
         self.running.store(false, Ordering::SeqCst);
         self.input_epoch.fetch_add(1, Ordering::SeqCst);
-        let _ = app.emit("running-changed", false);
+        app.running(false);
         self.report(app, "Idle");
         self.refresh_tray(app);
     }
@@ -140,13 +140,11 @@ impl Controller {
         }
     }
 
-    fn refresh_tray(&self, app: &AppHandle) {
-        if let Err(error) = crate::tray_status::update(app, self.tray_status()) {
-            self.report(app, &format!("Cannot update tray icon: {error}"));
-        }
+    fn refresh_tray(&self, app: &Notifier) {
+        app.tray(self.tray_status());
     }
 
-    pub fn set_main_visible(&self, app: &AppHandle, visible: bool) {
+    pub fn set_main_visible(&self, app: &Notifier, visible: bool) {
         self.main_visible.store(visible, Ordering::SeqCst);
         self.input_epoch.fetch_add(1, Ordering::SeqCst);
         self.refresh_tray(app);
@@ -181,7 +179,7 @@ impl Controller {
             && self.input_epoch.load(Ordering::SeqCst) == epoch
     }
 
-    pub fn start(self: &Arc<Self>, app: &AppHandle) -> Result<(), String> {
+    pub fn start(self: &Arc<Self>, app: &Notifier) -> Result<(), String> {
         let _intent = self.intent_lock.lock().unwrap();
         self.intent_epoch.fetch_add(1, Ordering::SeqCst);
         let clock = LocalClock::now()?;
@@ -192,7 +190,7 @@ impl Controller {
 
     pub fn start_scheduled(
         self: &Arc<Self>,
-        app: &AppHandle,
+        app: &Notifier,
         expected_intent: u64,
     ) -> Result<(), String> {
         let _intent = self.intent_lock.lock().unwrap();
@@ -202,7 +200,7 @@ impl Controller {
         self.activate(app)
     }
 
-    fn activate(self: &Arc<Self>, app: &AppHandle) -> Result<(), String> {
+    fn activate(self: &Arc<Self>, app: &Notifier) -> Result<(), String> {
         desktop::list_windows()?;
         let input_controller = self.clone();
         let stop_controller = self.clone();
@@ -224,7 +222,7 @@ impl Controller {
                 "Waiting for user input to settle..."
             },
         );
-        let _ = app.emit("running-changed", true);
+        app.running(true);
         Ok(())
     }
 }
@@ -539,7 +537,7 @@ fn review_editor_sequence(
     guard: &Guard<'_>,
     source: &desktop::WindowInfo,
     rng: &mut impl Rng,
-    app: &AppHandle,
+    app: &Notifier,
 ) -> StepResult {
     guard
         .controller
@@ -651,7 +649,7 @@ fn review_browser(
     restored.and(result)
 }
 
-pub fn spawn_worker(controller: Arc<Controller>, app: AppHandle) {
+pub fn spawn_worker(controller: Arc<Controller>, app: Notifier) {
     thread::spawn(move || {
         let mut rng = rand::rng();
         let mut enigo = None;
@@ -778,10 +776,10 @@ pub fn spawn_worker(controller: Arc<Controller>, app: AppHandle) {
                         )?;
                     }
                     let page_kind = SourceKind::detect(
-                        tauri::Url::parse(&tab.address)
+                        url::Url::parse(&tab.address)
                             .ok()
                             .as_ref()
-                            .and_then(tauri::Url::host_str),
+                            .and_then(url::Url::host_str),
                         &source.application,
                     );
                     let select_text = page_kind != SourceKind::Mail && rng.random_bool(0.35);
