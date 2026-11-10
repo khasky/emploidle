@@ -81,14 +81,13 @@ The workflow uses the automatic `GITHUB_TOKEN` and the repository's updater sign
 
 The built-in updater (`src/updater.rs`) checks `https://github.com/khasky/emploidle/releases/latest/download/latest.json` at startup. It installs a newer version only after the user chooses **Update and restart**, verifies the downloaded payload's minisign signature, stops activity, installs, and restarts. On Windows the installer performs the restart; on macOS and Linux the application restarts itself. The original executable or AppImage path is used instead of a temporary process image.
 
-The public key is the `PUBLIC_KEY` constant in `src/updater.rs`; it is the same key earlier Tauri builds trusted, so they can update to this version. The matching private key is stored in the GitHub Actions secret `TAURI_SIGNING_PRIVATE_KEY`; set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` too if the private key has a passphrase. CI passes them to `cargo packager signer sign` as `CARGO_PACKAGER_SIGN_PRIVATE_KEY` and `CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD`; the signature format is unchanged. Keep a secure backup of the private key outside the repository: losing it prevents installed copies from trusting later updates. Replacing the public key requires an update signed with the existing key first.
+The public key is the `PUBLIC_KEY` constant in `src/updater.rs`; it is the same key earlier Tauri builds trusted, so they can update to this version. The matching private key is stored in the GitHub Actions secret `TAURI_SIGNING_PRIVATE_KEY`; set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` too if the private key has a passphrase. CI signs with the Tauri CLI (`tauri signer sign`), because the minisign inside `cargo packager signer` cannot decrypt a key whose password is empty; the signature format is unchanged. Keep a secure backup of the private key outside the repository: losing it prevents installed copies from trusting later updates. Replacing the public key requires an update signed with the existing key first.
 
 Local builds need no signing key. CI signs every payload and fails if the signing secret is missing. To sign a local installer in PowerShell, use the path to the existing key:
 
 ```powershell
 pnpm build:desktop
-$env:CARGO_PACKAGER_SIGN_PRIVATE_KEY = Join-Path $HOME '.tauri/emploidle-updater.key'
-cargo packager signer sign target/packager/emploidle_<version>_x64-setup.exe
+npx @tauri-apps/cli@2.11.4 signer sign -f (Join-Path $HOME '.tauri/emploidle-updater.key') --password '' target/packager/emploidle_<version>_x64-setup.exe
 ```
 
 The public releases before updater support require a manual installation of a newer build once. Publishing a draft makes its `latest.json` available to installed copies; retain updater payloads and their signatures when editing release assets.

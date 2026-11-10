@@ -125,7 +125,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libx11-xcb-dev libfontconfig-dev libfuse2
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libx11-dev libx11-xcb-dev libxi-dev libfontconfig-dev libfuse2
       - name: Install tooling
         run: pnpm install --frozen-lockfile
       - name: Check versions
@@ -155,13 +155,17 @@ jobs:
           esac
           tar -czf "target/packager/Emploidle_${architecture}.app.tar.gz" -C target/packager Emploidle.app
       - name: Sign packages
+        # The Tauri CLI signs: its minisign 0.7.3 decrypts a key whose password
+        # is empty, which the minisign in cargo-packager skips, so that key
+        # fails there with 'Wrong password'. The password goes in as an
+        # argument so an empty one never turns into an interactive prompt.
         env:
-          CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           shopt -s nullglob
           for file in target/packager/*-setup.exe target/packager/*.AppImage target/packager/*.deb target/packager/*.dmg target/packager/*.app.tar.gz; do
-            cargo packager signer sign "$file"
+            npx --yes @tauri-apps/cli@2.11.4 signer sign --password "$KEY_PASSWORD" "$file"
           done
       - name: Upload release assets
         if: startsWith(github.ref, 'refs/tags/v')
