@@ -116,6 +116,7 @@ pub fn download(
     Ok(bytes)
 }
 
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 fn temporary(name: &str) -> Result<PathBuf, String> {
     let directory = std::env::temp_dir().join(format!("emploidle-update-{}", std::process::id()));
     std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
