@@ -2,6 +2,13 @@
 
 All notable changes are documented here. The format follows [Conventional Commits](https://www.conventionalcommits.org/) and the version scheme is [Semantic Versioning](https://semver.org/).
 
+## [1.1.0](https://github.com/khasky/emploidle/compare/v1.0.5...v1.1.0) (2026-11-10)
+
+
+### Features
+
+* **ui:** replace Tauri with a native GPUI interface ([33a7b53](https://github.com/khasky/emploidle/commit/33a7b53c853a26c66e33a41faa2ae0a05d8f10b2))
+
 ## [1.0.5](https://github.com/khasky/emploidle/compare/v1.0.4...v1.0.5) (2026-11-01)
 
 
