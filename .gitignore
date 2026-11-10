@@ -1,6 +1,5 @@
-# Rust / Tauri build output
-/src-tauri/target/
-/src-tauri/gen/
+# Rust build output
+/target/
 
 # OS cruft
 .DS_Store
